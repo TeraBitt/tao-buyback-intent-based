@@ -1,0 +1,214 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "buyAlpha",
+    "inputs": [
+      {
+        "name": "amountInWei",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minAlphaInRao",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "hotkey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "netuid",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "getColdkey",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getMyStake",
+    "inputs": [
+      {
+        "name": "hotkey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "netuid",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "sellAlpha",
+    "inputs": [
+      {
+        "name": "amountInRao",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minTaoWei",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "hotkey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "netuid",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "sellAlphaFull",
+    "inputs": [
+      {
+        "name": "minTaoWei",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "hotkey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "netuid",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "StakeExecuted",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "hotkey",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "taoAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "netuid",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "alphaReceived",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "UnstakeExecuted",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "hotkey",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "alphaAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "netuid",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "taoReceived",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  }
+]
