@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
-import { Wallet, ArrowRightLeft, Activity, AlertCircle, History, ShieldAlert } from 'lucide-react';
+import { Wallet, ArrowRightLeft, Activity, AlertCircle, History, ShieldAlert, LogOut } from 'lucide-react';
 import { CONFIG } from './config';
 import abiData from './abi.json';
 import './index.css';
@@ -36,6 +36,10 @@ function App() {
   const [stakeAmount, setStakeAmount] = useState<string>('');
   const [unstakeAmount, setUnstakeAmount] = useState<string>('');
   const [netuid, setNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
+  const [unstakeNetuid, setUnstakeNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
+  const [swapAmount, setSwapAmount] = useState<string>('');
+  const [swapSourceNetuid, setSwapSourceNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
+  const [swapTargetNetuid, setSwapTargetNetuid] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'staking' | 'chat'>('staking');
 
   const [status, setStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error', msg: string }>({ type: 'idle', msg: '' });
@@ -45,60 +49,101 @@ function App() {
       const contract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, prov);
       
       const currentBlock = await prov.getBlockNumber();
-      const fromBlock = Math.max(0, currentBlock - 50000);
+      // Look back 100,000 blocks to scan all recent intents
+      const fromBlock = Math.max(0, currentBlock - 100000);
       
-      const stakeFilter = contract.filters.StakeExecuted(userAddress);
-      const stakeEvents = await contract.queryFilter(stakeFilter, fromBlock, 'latest');
+      const intentFilter = contract.filters.IntentFilled(userAddress);
+      const intentEvents = await contract.queryFilter(intentFilter, fromBlock, 'latest');
       
-      const unstakeFilter = contract.filters.UnstakeExecuted(userAddress);
-      const unstakeEvents = await contract.queryFilter(unstakeFilter, fromBlock, 'latest');
-
       const history: StakeEvent[] = [];
-      const combinedEvents: { type: 'stake' | 'unstake', log: ethers.EventLog }[] = [];
+      
+      const contractInterface = new ethers.Interface(CONTRACT_ABI);
+      const stakingInterface = new ethers.Interface([
+        "function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
+        "function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
+        "function removeStakeFull(bytes32 hotkey, uint256 netuid) external"
+      ]);
 
-      for (const ev of stakeEvents) combinedEvents.push({ type: 'stake', log: ev as ethers.EventLog });
-      for (const ev of unstakeEvents) combinedEvents.push({ type: 'unstake', log: ev as ethers.EventLog });
+      for (const ev of intentEvents) {
+        try {
+          const log = ev as ethers.EventLog;
+          const txHash = log.transactionHash;
+          const tx = await prov.getTransaction(txHash);
+          if (!tx || !tx.data) continue;
 
-      combinedEvents.sort((a, b) => {
-        if (a.log.blockNumber !== b.log.blockNumber) return a.log.blockNumber - b.log.blockNumber;
-        return a.log.index - b.log.index;
-      });
+          // Parse transaction input data
+          const decoded = contractInterface.parseTransaction({ data: tx.data, value: tx.value });
+          if (!decoded || decoded.name !== 'fillIntent') continue;
+
+          const intent = decoded.args[0]; // Struct Intent is the first arg
+          const calls = intent.calls;
+
+          // Inspect the nested calls for staking interactions
+          for (const call of calls) {
+            if (call.target.toLowerCase() === "0x0000000000000000000000000000000000000805") {
+              const selector = call.callData.substring(0, 10);
+              
+              if (selector === stakingInterface.getFunction("addStake")?.selector) {
+                const parsedCall = stakingInterface.decodeFunctionData("addStake", call.callData);
+                const amountRao = parsedCall[1];
+                const evNetuid = Number(parsedCall[2]);
+                history.push({
+                  type: 'stake',
+                  taoAmount: (Number(amountRao * 1000000000n) / 1e18).toFixed(4),
+                  alphaAmount: (Number(amountRao) / 1e9).toFixed(4),
+                  netuid: evNetuid,
+                  txHash: txHash,
+                  blockNumber: log.blockNumber,
+                });
+              } 
+              else if (selector === stakingInterface.getFunction("removeStake")?.selector) {
+                const parsedCall = stakingInterface.decodeFunctionData("removeStake", call.callData);
+                const amountRao = parsedCall[1];
+                const evNetuid = Number(parsedCall[2]);
+                history.push({
+                  type: 'unstake',
+                  taoAmount: (Number(amountRao * 1000000000n) / 1e18).toFixed(4),
+                  alphaAmount: (Number(amountRao) / 1e9).toFixed(4),
+                  netuid: evNetuid,
+                  txHash: txHash,
+                  blockNumber: log.blockNumber,
+                });
+              }
+              else if (selector === stakingInterface.getFunction("removeStakeFull")?.selector) {
+                const parsedCall = stakingInterface.decodeFunctionData("removeStakeFull", call.callData);
+                const evNetuid = Number(parsedCall[1]);
+                history.push({
+                  type: 'unstake',
+                  taoAmount: 'ALL',
+                  alphaAmount: 'ALL',
+                  netuid: evNetuid,
+                  txHash: txHash,
+                  blockNumber: log.blockNumber,
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Failed to parse intent history item:", err);
+        }
+      }
 
       const netBalances: { [id: number]: bigint } = {};
 
-      for (const item of combinedEvents) {
-        const { type, log } = item;
-        const evNetuid = Number(log.args[3]);
+      for (const item of history) {
+        const evNetuid = item.netuid;
         if (netBalances[evNetuid] === undefined) netBalances[evNetuid] = BigInt(0);
 
-        if (type === 'stake') {
-          const taoWei = log.args[2];
-          const alphaRao = log.args[4];
+        if (item.type === 'stake') {
+          const alphaRao = ethers.parseUnits(item.alphaAmount, 9);
           netBalances[evNetuid] += alphaRao;
-          history.push({
-            type: 'stake',
-            taoAmount: (Number(taoWei) / 1e18).toFixed(4),
-            alphaAmount: (Number(alphaRao) / 1e9).toFixed(4),
-            netuid: evNetuid,
-            txHash: log.transactionHash,
-            blockNumber: log.blockNumber,
-          });
         } else {
-          const alphaRao = log.args[2];
-          const taoWei = log.args[4];
-          if (alphaRao === BigInt(0)) {
+          if (item.alphaAmount === 'ALL') {
             netBalances[evNetuid] = BigInt(0);
           } else {
+            const alphaRao = ethers.parseUnits(item.alphaAmount, 9);
             netBalances[evNetuid] -= alphaRao;
           }
-          history.push({
-            type: 'unstake',
-            taoAmount: (Number(taoWei) / 1e18).toFixed(4),
-            alphaAmount: alphaRao === BigInt(0) ? 'ALL' : (Number(alphaRao) / 1e9).toFixed(4),
-            netuid: evNetuid,
-            txHash: log.transactionHash,
-            blockNumber: log.blockNumber,
-          });
         }
       }
 
@@ -112,7 +157,6 @@ function App() {
         formattedBalances[Number(id)] = (Number(value) / 1e9).toFixed(4);
       }
       setAllAlphaBalances(formattedBalances);
-      
       setStakeHistory(history);
     } catch (e) {
       console.error('Failed to fetch stake history:', e);
@@ -143,7 +187,33 @@ function App() {
     if (provider && account) {
       fetchStats(provider, account);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [netuid, account, provider]);
+
+  const clearWalletState = () => {
+    setAccount('');
+    setSigner(null);
+    setProvider(null);
+    setStatus({ type: 'idle', msg: '' });
+    setBalance('0');
+    setTotalAlphaStaked('0');
+    setMyAlphaBalance('0');
+    setStakeHistory([]);
+  };
+
+  const disconnectWallet = async () => {
+    clearWalletState();
+    try {
+      if (window.ethereum && window.ethereum.request) {
+        await window.ethereum.request({
+          method: "wallet_revokePermissions",
+          params: [{ eth_accounts: {} }]
+        });
+      }
+    } catch (error) {
+      console.error("Failed to revoke permissions:", error);
+    }
+  };
 
   const connectWallet = async () => {
     if (!window.ethereum) {
@@ -191,22 +261,13 @@ function App() {
 
   useEffect(() => {
     if (window.ethereum) {
-      // Prompt wallet connection on load if not connected, as requested
       connectWallet();
 
       const handleAccountsChanged = (accounts: string[]) => {
         if (accounts.length > 0) {
           connectWallet();
         } else {
-          setAccount('');
-          setSigner(null);
-          setProvider(null);
-          setStatus({ type: 'idle', msg: '' });
-          setBalance('0');
-          // reset alpha balance on disconnect
-          setTotalAlphaStaked('0');
-          setMyAlphaBalance('0');
-          setStakeHistory([]);
+          clearWalletState();
         }
       };
 
@@ -227,17 +288,71 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const executeStake = async (amount: string, targetNetuid: number): Promise<boolean> => {
-    if (!signer || !amount) return false;
+  const signAndExecuteIntent = async (
+    calls: any[],
+    condition: any,
+    valueToSend: bigint
+  ): Promise<boolean> => {
+    if (!signer || !account) return false;
     try {
-      setStatus({ type: 'loading', msg: `Staking ${amount} TAO to Netuid ${targetNetuid}...` });
       const contract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-      const amountInWei = ethers.parseEther(amount);
-      const tx = await contract.buyAlpha(amountInWei, 1, CONFIG.DEFAULT_HOTKEY, targetNetuid, { value: amountInWei });
-      setStatus({ type: 'loading', msg: 'Waiting for confirmation...' });
+      
+      const domain = {
+        name: "SynchronousIntent",
+        version: "1",
+        chainId: Number(CONFIG.NETWORK.chainId),
+        verifyingContract: CONFIG.CONTRACT_ADDRESS
+      };
+
+      const types = {
+        Condition: [
+          { name: 'asset', type: 'uint8' },
+          { name: 'minOutput', type: 'uint256' },
+          { name: 'hotkey', type: 'bytes32' },
+          { name: 'netuid', type: 'uint16' }
+        ],
+        Call: [
+          { name: 'target', type: 'address' },
+          { name: 'value', type: 'uint256' },
+          { name: 'callData', type: 'bytes' }
+        ],
+        Intent: [
+          { name: 'user', type: 'address' },
+          { name: 'calls', type: 'Call[]' },
+          { name: 'condition', type: 'Condition' },
+          { name: 'deadline', type: 'uint256' },
+          { name: 'nonce', type: 'uint256' }
+        ]
+      };
+
+      const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour
+      const nonce = Date.now(); // Unique nonce
+
+      const intentValue = {
+        user: account,
+        calls: calls,
+        condition: condition,
+        deadline: deadline,
+        nonce: nonce
+      };
+
+      setStatus({ type: 'loading', msg: 'Prompting EIP-712 Signature in MetaMask...' });
+      const signature = await signer.signTypedData(domain, types, intentValue);
+
+      const intentWithSig = {
+        ...intentValue,
+        signature: signature
+      };
+
+      setStatus({ type: 'loading', msg: 'Broadcasting fillIntent transaction...' });
+      const tx = await contract.fillIntent(intentWithSig, "0x", { 
+        value: valueToSend,
+        gasLimit: 800000n // Bypasses the Substrate EVM node gas estimation simulation bugs
+      });
+      
+      setStatus({ type: 'loading', msg: 'Waiting for blockchain confirmation...' });
       await tx.wait();
-      setStatus({ type: 'success', msg: 'Stake added successfully!' });
-      await fetchStats(provider!, account);
+      
       return true;
     } catch (err: any) {
       console.error(err);
@@ -246,42 +361,219 @@ function App() {
     }
   };
 
-  const executeUnstake = async (targetNetuid: number, amount?: string): Promise<boolean> => {
-    if (!signer) return false;
+  const executeStake = async (amount: string, targetNetuid: number, targetHotkey?: string): Promise<boolean> => {
+    if (!signer || !amount) return false;
     try {
-      const contract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-      if (amount && amount !== '' && parseFloat(amount) > 0) {
-        setStatus({ type: 'loading', msg: `Unstaking ${amount} Alpha from Netuid ${targetNetuid}...` });
-        const amountInRao = ethers.parseUnits(amount, 9);
-        const tx = await contract.sellAlpha(amountInRao, 1, CONFIG.DEFAULT_HOTKEY, targetNetuid);
-        setStatus({ type: 'loading', msg: 'Waiting for confirmation...' });
-        await tx.wait();
-        setStatus({ type: 'success', msg: `Successfully unstaked ${amount} Alpha!` });
-      } else {
-        setStatus({ type: 'loading', msg: `Unstaking all Alpha from Netuid ${targetNetuid}...` });
-        const tx = await contract.sellAlphaFull(1, CONFIG.DEFAULT_HOTKEY, targetNetuid);
-        setStatus({ type: 'loading', msg: 'Waiting for confirmation...' });
-        await tx.wait();
-        setStatus({ type: 'success', msg: 'All Alpha unstaked! TAO returned to your wallet.' });
+      setStatus({ type: 'loading', msg: `Preparing Stake Intent of ${amount} TAO...` });
+      
+      const amountInWei = ethers.parseEther(amount);
+      const amountInRao = amountInWei / 1000000000n; // 1e9
+
+      // Resolve destination hotkey:
+      const hotkey = (targetHotkey && targetHotkey.startsWith('0x') && targetHotkey.length === 66)
+        ? targetHotkey
+        : getHotkeyForNetuid(targetNetuid);
+
+      // Encode Staking Precompile call
+      const stakingInterface = new ethers.Interface([
+        "function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external"
+      ]);
+      const callData = stakingInterface.encodeFunctionData("addStake", [
+        hotkey,
+        amountInRao,
+        targetNetuid
+      ]);
+
+      const calls = [{
+        target: "0x0000000000000000000000000000000000000805",
+        // V2 precompile pulls TAO from the contract's own balance automatically.
+        // Do NOT forward value here or the precompile will reject it (it is not payable).
+        value: 0n,
+        callData: callData
+      }];
+
+      const condition = {
+        asset: 1, // ALPHA
+        minOutput: 1n, // Any positive alpha received means success
+        hotkey: hotkey,
+        netuid: targetNetuid
+      };
+
+      // Send amountInWei as msg.value so fillIntent holds it, and the precompile deducts from the contract balance.
+      const success = await signAndExecuteIntent(calls, condition, amountInWei);
+      if (success) {
+        setStatus({ type: 'success', msg: 'Stake intent executed successfully!' });
+        await fetchStats(provider!, account);
       }
-      await fetchStats(provider!, account);
-      return true;
+      return success;
     } catch (err: any) {
       console.error(err);
-      setStatus({ type: 'error', msg: err.reason || err.message || 'Transaction failed' });
+      setStatus({ type: 'error', msg: err.reason || err.message || 'Failed to prepare stake' });
       return false;
     }
+  };
+
+  const executeUnstake = async (
+    targetNetuid: number,
+    amountOrHotkey?: string,
+    amountIfHotkeyUsed?: string
+  ): Promise<boolean> => {
+    if (!signer) return false;
+    try {
+      setStatus({ type: 'loading', msg: 'Preparing Unstake Intent...' });
+
+      let hotkey = getHotkeyForNetuid(targetNetuid);
+      let amount = amountOrHotkey;
+
+      if (amountOrHotkey && amountOrHotkey.startsWith('0x') && amountOrHotkey.length === 66) {
+        hotkey = amountOrHotkey;
+        amount = amountIfHotkeyUsed;
+      }
+
+      // Encode Staking Precompile call
+      const stakingInterface = new ethers.Interface([
+        "function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
+        "function removeStakeFull(bytes32 hotkey, uint256 netuid) external"
+      ]);
+
+      let callData: string;
+      if (amount && amount !== '' && parseFloat(amount) > 0) {
+        const amountInRao = ethers.parseUnits(amount, 9);
+        callData = stakingInterface.encodeFunctionData("removeStake", [
+          hotkey,
+          amountInRao,
+          targetNetuid
+        ]);
+      } else {
+        callData = stakingInterface.encodeFunctionData("removeStakeFull", [
+          hotkey,
+          targetNetuid
+        ]);
+      }
+
+      const calls = [{
+        target: "0x0000000000000000000000000000000000000805",
+        value: 0n,
+        callData: callData
+      }];
+
+      const condition = {
+        asset: 0, // TAO
+        minOutput: 1n, // Mathematically guaranteed positive TAO returned
+        hotkey: ethers.ZeroHash,
+        netuid: 0
+      };
+
+      const success = await signAndExecuteIntent(calls, condition, 0n);
+      if (success) {
+        setStatus({ type: 'success', msg: 'Unstake intent executed successfully!' });
+        await fetchStats(provider!, account);
+      }
+      return success;
+    } catch (err: any) {
+      console.error(err);
+      setStatus({ type: 'error', msg: err.reason || err.message || 'Failed to prepare unstake' });
+      return false;
+    }
+  };
+
+  const executeSwap = async (
+    sourceNetuid: number,
+    targetNetuid: number,
+    amountOrHotkey: string,
+    amountIfHotkeyUsed?: string
+  ): Promise<boolean> => {
+    if (!signer || !amountOrHotkey) return false;
+    try {
+      setStatus({ type: 'loading', msg: `Preparing Swap Intent...` });
+
+      let sourceHotkey = getHotkeyForNetuid(sourceNetuid);
+      let targetHotkey = getHotkeyForNetuid(targetNetuid);
+      let amount = amountOrHotkey;
+
+      if (amountOrHotkey.startsWith('0x') && amountOrHotkey.length === 66) {
+        sourceHotkey = amountOrHotkey;
+        targetHotkey = getHotkeyForNetuid(targetNetuid);
+        amount = amountIfHotkeyUsed || '';
+      }
+
+      const amountInRao = ethers.parseUnits(amount, 9);
+
+      // Encode Staking Precompile calls
+      const stakingInterface = new ethers.Interface([
+        "function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
+        "function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external"
+      ]);
+
+      const calls = [
+        // Call 1: Unstake Alpha from source subnet
+        {
+          target: "0x0000000000000000000000000000000000000805",
+          value: 0n,
+          callData: stakingInterface.encodeFunctionData("removeStake", [
+            sourceHotkey,
+            amountInRao,
+            sourceNetuid
+          ])
+        },
+        // Call 2: Stake TAO to target subnet
+        {
+          target: "0x0000000000000000000000000000000000000805",
+          value: 0n,
+          callData: stakingInterface.encodeFunctionData("addStake", [
+            targetHotkey,
+            amountInRao,
+            targetNetuid
+          ])
+        }
+      ];
+
+      const condition = {
+        asset: 1, // ALPHA
+        minOutput: 1n,
+        hotkey: targetHotkey,
+        netuid: targetNetuid
+      };
+
+      const success = await signAndExecuteIntent(calls, condition, 0n);
+      if (success) {
+        setStatus({ type: 'success', msg: 'Swap intent executed successfully!' });
+        await fetchStats(provider!, account);
+      }
+      return success;
+    } catch (err: any) {
+      console.error(err);
+      setStatus({ type: 'error', msg: err.reason || err.message || 'Failed to prepare swap' });
+      return false;
+    }
+  };
+
+  const getHotkeyForNetuid = (net: number): string => {
+    if (net === 310) {
+      return "0x3cba5f549c02a4da782cadb65564d0e8159f339f5610db4bd5773f36c760f97c";
+    }
+    // Default fallback (Subnets 0, 1, etc.)
+    return "0x1e738b33dfbd68eaba7db3f03fe942cfa4e32b728e52c26743b16dbca15af464";
   };
 
   const handleBuyAlpha = async () => {
-    if (await executeStake(stakeAmount, netuid)) {
+    const hotkey = getHotkeyForNetuid(netuid);
+    if (await executeStake(stakeAmount, netuid, hotkey)) {
       setStakeAmount('');
     }
   };
 
   const handleUnstake = async () => {
-    if (await executeUnstake(netuid, unstakeAmount)) {
+    const hotkey = getHotkeyForNetuid(unstakeNetuid);
+    if (await executeUnstake(unstakeNetuid, hotkey, unstakeAmount)) {
       setUnstakeAmount('');
+    }
+  };
+
+  const handleSwap = async () => {
+    const hotkey = getHotkeyForNetuid(swapSourceNetuid);
+    if (await executeSwap(swapSourceNetuid, swapTargetNetuid, hotkey, swapAmount)) {
+      setSwapAmount('');
     }
   };
 
@@ -305,9 +597,19 @@ function App() {
         {/* Wallet */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {account ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', background: 'rgba(16, 185, 129, 0.08)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-              <span className="status-indicator"></span>
-              <span className="mono text-sm">{account.substring(0, 6)}...{account.substring(38)}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', background: 'rgba(16, 185, 129, 0.08)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                <span className="status-indicator"></span>
+                <span className="mono text-sm">{account.substring(0, 6)}...{account.substring(38)}</span>
+              </div>
+              <button 
+                className="btn btn-secondary" 
+                style={{ padding: '8px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} 
+                onClick={disconnectWallet}
+                title="Disconnect Wallet"
+              >
+                <LogOut size={16} color="var(--status-error)" />
+              </button>
             </div>
           ) : (
             <button className="btn btn-primary" onClick={connectWallet}>
@@ -369,7 +671,7 @@ function App() {
             )}
 
         {account && (
-          <div className="grid-cols-2">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px' }}>
             {/* Add Stake Panel */}
             <div className="glass-panel" style={{ padding: '28px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
@@ -391,6 +693,35 @@ function App() {
               </button>
             </div>
 
+            {/* Swap Stake Panel */}
+            <div className="glass-panel" style={{ padding: '28px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                <ArrowRightLeft size={18} color="var(--accent-primary)" />
+                <h3 style={{ margin: 0, fontWeight: 600 }}>Swap Stake</h3>
+              </div>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Atomically move your stake from one subnet to another.</p>
+
+              <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+                <div style={{ flex: 1 }}>
+                  <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Source Netuid</label>
+                  <input type="number" className="input-field" value={swapSourceNetuid} onChange={(e) => setSwapSourceNetuid(Number(e.target.value))} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Target Netuid</label>
+                  <input type="number" className="input-field" value={swapTargetNetuid} onChange={(e) => setSwapTargetNetuid(Number(e.target.value))} />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span></label>
+                <input type="number" className="input-field" placeholder="0.00" value={swapAmount} onChange={(e) => setSwapAmount(e.target.value)} />
+              </div>
+
+              <button className="btn btn-primary" style={{ width: '100%', padding: '13px' }} disabled={!account || !swapAmount || status.type === 'loading'} onClick={handleSwap}>
+                <ArrowRightLeft size={16} /> Swap Stake
+              </button>
+            </div>
+
             {/* Remove Stake Panel */}
             <div className="glass-panel" style={{ padding: '28px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
@@ -399,6 +730,10 @@ function App() {
               </div>
               <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Convert Alpha back to TAO. Leave blank to unstake all.</p>
 
+              <div style={{ marginBottom: '16px' }}>
+                <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Subnet (Netuid)</label>
+                <input type="number" className="input-field" value={unstakeNetuid} onChange={(e) => setUnstakeNetuid(Number(e.target.value))} />
+              </div>
               <div style={{ marginBottom: '24px' }}>
                 <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span></label>
                 <input type="number" className="input-field" placeholder={`Max: ${myAlphaBalance}`} value={unstakeAmount} onChange={(e) => setUnstakeAmount(e.target.value)} />
@@ -455,7 +790,15 @@ function App() {
                       <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono">{ev.alphaAmount}</td>
                       <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono text-muted">{ev.blockNumber}</td>
                       <td style={{ textAlign: 'right', padding: '10px 12px' }}>
-                        <span className="mono text-muted" style={{ fontSize: '11px' }}>{ev.txHash.substring(0, 10)}...</span>
+                        <a 
+                          href={`https://evm-testnet.subtensor.io/tx/${ev.txHash}`} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="mono text-accent" 
+                          style={{ fontSize: '11px', textDecoration: 'none' }}
+                        >
+                          {ev.txHash.substring(0, 10)}...
+                        </a>
                       </td>
                     </tr>
                   ))}
@@ -474,6 +817,7 @@ function App() {
             currentNetuid={netuid}
             executeStake={executeStake}
             executeUnstake={executeUnstake}
+            executeSwap={executeSwap}
             status={status}
           />
         )}

@@ -11,6 +11,7 @@ interface ChatPortalProps {
   currentNetuid: number;
   executeStake: (amount: string, netuid: number) => Promise<boolean>;
   executeUnstake: (netuid: number, amount?: string) => Promise<boolean>;
+  executeSwap: (sourceNetuid: number, targetNetuid: number, amount: string) => Promise<boolean>;
   status: { type: 'idle' | 'loading' | 'success' | 'error', msg: string };
 }
 
@@ -40,6 +41,20 @@ const unstakeTool: FunctionDeclaration = {
   }
 };
 
+const swapTool: FunctionDeclaration = {
+  name: 'initiate_swap',
+  description: 'Show a UI to the user to confirm swapping Alpha stake from one Netuid (source subnet) to another Netuid (target subnet).',
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      sourceNetuid: { type: SchemaType.NUMBER, description: 'Source Netuid to unstake Alpha from (default 310)' },
+      targetNetuid: { type: SchemaType.NUMBER, description: 'Target Netuid to stake Alpha into' },
+      amount: { type: SchemaType.STRING, description: 'Amount of Alpha/TAO to swap' }
+    },
+    required: ['sourceNetuid', 'targetNetuid', 'amount']
+  }
+};
+
 const checkBalancesTool: FunctionDeclaration = {
   name: 'check_balances',
   description: 'Get the user\'s current on-chain balances for TAO and their staked Alpha across all netuids. This allows answering questions like "What is my stake on netuid X?"',
@@ -53,13 +68,14 @@ interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   action?: {
-    type: 'stake' | 'unstake';
+    type: 'stake' | 'unstake' | 'swap';
     amount?: string;
     netuid: number;
+    targetNetuid?: number;
   };
 }
 
-export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaBalances, currentNetuid, executeStake, executeUnstake, status }: ChatPortalProps) {
+export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaBalances, currentNetuid, executeStake, executeUnstake, executeSwap, status }: ChatPortalProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -72,8 +88,8 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
-    tools: [{ functionDeclarations: [stakeTool, unstakeTool, checkBalancesTool] }],
-    systemInstruction: "You are the SyncIntent OS AI assistant. You help users stake and unstake TAO. Be concise, cyberpunk-styled, and helpful. If a user wants to stake or unstake, always use the tools provided to initiate the action rather than just explaining it."
+    tools: [{ functionDeclarations: [stakeTool, unstakeTool, swapTool, checkBalancesTool] }],
+    systemInstruction: "You are the SyncIntent OS AI assistant. You help users stake, unstake, and swap TAO/Alpha. Be concise, cyberpunk-styled, and helpful. If a user wants to stake, unstake, or swap, always use the tools provided to initiate the action rather than just explaining it."
   });
 
   const [chatSession, setChatSession] = useState<ChatSession | null>(null);
@@ -155,6 +171,24 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
             }]);
           }
         }
+        else if (call.name === 'initiate_swap' && chatSession) {
+          const { sourceNetuid, targetNetuid, amount } = call.args as { sourceNetuid: number, targetNetuid: number, amount: string };
+          const alphaOnSource = parseFloat(allAlphaBalances[sourceNetuid] || '0');
+          if (alphaOnSource < parseFloat(amount)) {
+            const functionResponse = {
+              name: call.name,
+              response: { error: `Insufficient Alpha balance on source Netuid ${sourceNetuid}. You only have ${alphaOnSource} Alpha.` }
+            };
+            const nextResult = await chatSession.sendMessage([{ functionResponse }]);
+            await processResponse(nextResult);
+          } else {
+            setMessages(prev => [...prev, {
+              role: 'model',
+              text: `I've prepared a Swap intent to move ${amount} Alpha from Netuid ${sourceNetuid} to Netuid ${targetNetuid}. Please confirm:`,
+              action: { type: 'swap', netuid: sourceNetuid, targetNetuid, amount }
+            }]);
+          }
+        }
       }
     } else {
       const text = response.text();
@@ -165,7 +199,6 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
   };
 
   const handleAction = async (action: NonNullable<ChatMessage['action']>) => {
-    // Optimistic UI disable handled by status loading state below
     if (action.type === 'stake' && action.amount && chatSession) {
       const success = await executeStake(action.amount, action.netuid);
       if (success) {
@@ -182,6 +215,15 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
         setMessages(prev => [...prev, { role: 'user', text: `[System] ${textMsg}` }]);
         setLoading(true);
         const result = await chatSession.sendMessage(`The unstaking transaction from netuid ${action.netuid} was successful! Confirm to the user.`);
+        await processResponse(result);
+        setLoading(false);
+      }
+    } else if (action.type === 'swap' && action.targetNetuid && action.amount && chatSession) {
+      const success = await executeSwap(action.netuid, action.targetNetuid, action.amount);
+      if (success) {
+        setMessages(prev => [...prev, { role: 'user', text: `[System] Confirmed Swap of ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid}.` }]);
+        setLoading(true);
+        const result = await chatSession.sendMessage(`The Swap transaction of ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid} was successful! Confirm to the user.`);
         await processResponse(result);
         setLoading(false);
       }
@@ -238,7 +280,7 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
                 <div style={{ marginTop: '12px', width: '100%', minWidth: '280px' }} className="glass-panel">
                   <div style={{ padding: '16px' }}>
                     <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--text-primary)' }}>
-                      {msg.action.type === 'stake' ? 'Stake Confirmation' : 'Unstake Confirmation'}
+                      {msg.action.type === 'stake' ? 'Stake Confirmation' : msg.action.type === 'unstake' ? 'Unstake Confirmation' : 'Swap Confirmation'}
                     </h4>
                     {msg.action.type === 'stake' && (
                       <div style={{ marginBottom: '16px', fontSize: '13px' }}>
@@ -266,13 +308,29 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
                         </div>
                       </div>
                     )}
+                    {msg.action.type === 'swap' && (
+                      <div style={{ marginBottom: '16px', fontSize: '13px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <span className="text-muted">Amount</span>
+                          <span className="mono">{msg.action.amount} Alpha</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <span className="text-muted">From Netuid</span>
+                          <span className="mono">{msg.action.netuid}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span className="text-muted">To Netuid</span>
+                          <span className="mono">{msg.action.targetNetuid}</span>
+                        </div>
+                      </div>
+                    )}
                     <button
                       className="btn btn-primary"
                       style={{ width: '100%', padding: '10px', fontSize: '13px' }}
                       onClick={() => msg.action && handleAction(msg.action)}
                       disabled={status.type === 'loading'}
                     >
-                      <ArrowRightLeft size={14} /> {msg.action.type === 'stake' ? 'Execute Stake' : 'Execute Unstake'}
+                      <ArrowRightLeft size={14} /> {msg.action.type === 'stake' ? 'Execute Stake' : msg.action.type === 'unstake' ? 'Execute Unstake' : 'Execute Swap'}
                     </button>
                   </div>
                 </div>
@@ -299,7 +357,7 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
           <input
             type="text"
             className="input-field"
-            placeholder={account ? "E.g., 'Stake 0.5 TAO to netuid 310' or 'What is my balance?'" : "Connect wallet to chat..."}
+            placeholder={account ? "E.g., 'Stake 0.5 TAO to netuid 310' or 'Swap 1 Alpha from 310 to 311'" : "Connect wallet to chat..."}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}

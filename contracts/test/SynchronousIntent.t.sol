@@ -4,12 +4,10 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/SynchronousIntent.sol";
 
-// Mock for the Staking Precompile
 contract MockStakingPrecompile {
     bool public shouldFail;
     bool public slippageSimulation;
 
-    // hotkey -> netuid -> total stake
     mapping(bytes32 => mapping(uint256 => uint256)) public stakes;
 
     function setShouldFail(bool _shouldFail) external {
@@ -24,17 +22,16 @@ contract MockStakingPrecompile {
         return stakes[hotkey][netuid];
     }
 
-    // Allow tests to set initial stake
     function setStake(bytes32 hotkey, uint256 netuid, uint256 amount) external {
         stakes[hotkey][netuid] = amount;
     }
 
-    function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external {
+    function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external payable {
         require(!shouldFail, "Precompile configured to fail");
 
         uint256 amountToAdd = amount;
         if (slippageSimulation) {
-            amountToAdd = amount / 2; // Simulate receiving less stake
+            amountToAdd = amount / 2;
         }
 
         stakes[hotkey][netuid] += amountToAdd;
@@ -48,106 +45,224 @@ contract MockStakingPrecompile {
 
         uint256 amountToMint = amount * 1e9;
         if (slippageSimulation) {
-            amountToMint = (amount * 1e9) / 2; // Simulate receiving less TAO
+            amountToMint = (amount * 1e9) / 2;
         }
         
-        // Native TAO transfer back to caller (SynchronousIntent)
         payable(msg.sender).transfer(amountToMint);
     }
 
-    // Required to receive TAO native token when it's sent along with the call or via fallback
+    function removeStakeFull(bytes32 hotkey, uint256 netuid) external {
+        require(!shouldFail, "Precompile configured to fail");
+        uint256 amount = stakes[hotkey][netuid];
+        stakes[hotkey][netuid] = 0;
+
+        uint256 amountToMint = amount * 1e9;
+        if (slippageSimulation) {
+            amountToMint = (amount * 1e9) / 2;
+        }
+        
+        payable(msg.sender).transfer(amountToMint);
+    }
+
+    receive() external payable {}
+}
+
+contract MockSolver is ISolver {
+    SynchronousIntent public intentContract;
+
+    constructor(SynchronousIntent _intentContract) {
+        intentContract = _intentContract;
+    }
+
+    function executeFill(bytes calldata solverData) external {
+        // Mock solver callback - does nothing right now
+    }
+    
     receive() external payable {}
 }
 
 contract SynchronousIntentTest is Test {
     SynchronousIntent public intentContract;
+    MockSolver public solver;
 
-    address public user = address(0x1234);
-    bytes32 public testHotkey = keccak256("test_hotkey");
-    uint16 public testNetuid = 1;
+    uint256 userPk = 0x1234;
+    address user = vm.addr(userPk);
+    address solverAddr = address(0x999);
+
+    bytes32 testHotkey = keccak256("test_hotkey");
+    uint16 testNetuid = 1;
+
+    bytes32 private constant CONDITION_TYPEHASH = keccak256("Condition(uint8 asset,uint256 minOutput,bytes32 hotkey,uint16 netuid)");
+    bytes32 private constant CALL_TYPEHASH = keccak256("Call(address target,uint256 value,bytes callData)");
+    bytes32 private constant INTENT_TYPEHASH = keccak256("Intent(address user,Call[] calls,Condition condition,uint256 deadline,uint256 nonce)Call(address target,uint256 value,bytes callData)Condition(uint8 asset,uint256 minOutput,bytes32 hotkey,uint16 netuid)");
 
     function setUp() public {
         intentContract = new SynchronousIntent();
+        solver = new MockSolver(intentContract);
 
-        // Initial TAO for testing
         vm.deal(user, 100 * 1e18);
+        vm.deal(solverAddr, 1000 * 1e18);
 
-        // 1. Etch the mock bytecode to the precompile addresses
         vm.etch(ISTAKING_ADDRESS, address(new MockStakingPrecompile()).code);
-
-        // Provide the mock staking precompile with native TAO to simulate network minting
         vm.deal(ISTAKING_ADDRESS, 1000 * 1e18);
     }
 
-    function test_BuyAlphaSuccess() public {
-        vm.startPrank(user);
+    function _hashCondition(Condition memory condition) internal pure returns (bytes32) {
+        return keccak256(abi.encode(
+            CONDITION_TYPEHASH,
+            condition.asset,
+            condition.minOutput,
+            condition.hotkey,
+            condition.netuid
+        ));
+    }
 
-        intentContract.buyAlpha{value: 50 * 1e18}(50 * 1e18, 50 * 1e9, testHotkey, testNetuid);
-        vm.stopPrank();
+    function _hashCalls(Call[] memory calls) internal pure returns (bytes32) {
+        bytes32[] memory callHashes = new bytes32[](calls.length);
+        for (uint256 i = 0; i < calls.length; i++) {
+            callHashes[i] = keccak256(abi.encode(
+                CALL_TYPEHASH,
+                calls[i].target,
+                calls[i].value,
+                keccak256(calls[i].callData)
+            ));
+        }
+        return keccak256(abi.encodePacked(callHashes));
+    }
 
-        // Check user TAO balance
-        assertEq(user.balance, 50 * 1e18); // 50 TAO spent
+    function _signIntent(Intent memory intent, uint256 privateKey) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                INTENT_TYPEHASH,
+                intent.user,
+                _hashCalls(intent.calls),
+                _hashCondition(intent.condition),
+                intent.deadline,
+                intent.nonce
+            )
+        );
+        bytes32 domainSeparator = intentContract.domainSeparator();
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         
-        // Check global stake
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function test_BuyAlphaSuccess() public {
+        Call[] memory calls = new Call[](1);
+        // Using amount 50 TAO = 50 * 1e18
+        // amountInRao = 50 * 1e9
+        calls[0] = Call({
+            target: ISTAKING_ADDRESS,
+            value: 50 * 1e18,
+            callData: abi.encodeWithSelector(IStaking.addStake.selector, testHotkey, 50 * 1e9, testNetuid)
+        });
+
+        Condition memory cond = Condition({
+            asset: AssetType.ALPHA,
+            minOutput: 50 * 1e9,
+            hotkey: testHotkey,
+            netuid: testNetuid
+        });
+
+        Intent memory intent = Intent({
+            user: user,
+            calls: calls,
+            condition: cond,
+            deadline: block.timestamp + 100,
+            nonce: 1,
+            signature: ""
+        });
+        intent.signature = _signIntent(intent, userPk);
+
+        vm.startPrank(solverAddr);
+        intentContract.fillIntent{value: 50 * 1e18}(intent, "");
+        vm.stopPrank();
+
         assertEq(MockStakingPrecompile(payable(ISTAKING_ADDRESS)).getTotalAlphaStaked(testHotkey, testNetuid), 50 * 1e9);
-    }
-
-    function test_BuyAlphaRevertsIfPrecompileFails() public {
-        vm.startPrank(user);
-
-        MockStakingPrecompile(payable(ISTAKING_ADDRESS)).setShouldFail(true);
-
-        vm.expectRevert("addStake precompile call failed");
-        intentContract.buyAlpha{value: 50 * 1e18}(50 * 1e18, 50 * 1e9, testHotkey, testNetuid);
-        vm.stopPrank();
-    }
-
-    function test_BuyAlphaRevertsOnSlippage() public {
-        vm.startPrank(user);
-
-        MockStakingPrecompile(payable(ISTAKING_ADDRESS)).setSlippageSimulation(true);
-
-        // Expecting 50 Alpha, but mock only adds 25 (simulated slippage)
-        vm.expectRevert("Slippage: Received less Alpha than expected");
-        intentContract.buyAlpha{value: 50 * 1e18}(50 * 1e18, 50 * 1e9, testHotkey, testNetuid);
-        vm.stopPrank();
+        assertTrue(intentContract.usedNonces(1));
     }
 
     function test_SellAlphaSuccess() public {
-        // Setup initial stake balance
-        vm.startPrank(user);
-        intentContract.buyAlpha{value: 50 * 1e18}(50 * 1e18, 50 * 1e9, testHotkey, testNetuid);
+        MockStakingPrecompile(payable(ISTAKING_ADDRESS)).setStake(testHotkey, testNetuid, 50 * 1e9);
 
-        // Now sell
-        intentContract.sellAlpha(50 * 1e9, 50 * 1e18, testHotkey, testNetuid);
+        Call[] memory calls = new Call[](1);
+        calls[0] = Call({
+            target: ISTAKING_ADDRESS,
+            value: 0,
+            callData: abi.encodeWithSelector(IStaking.removeStake.selector, testHotkey, 50 * 1e9, testNetuid)
+        });
+
+        Condition memory cond = Condition({
+            asset: AssetType.TAO,
+            minOutput: 45 * 1e18, // slippage tolerance
+            hotkey: bytes32(0),
+            netuid: 0
+        });
+
+        Intent memory intent = Intent({
+            user: user,
+            calls: calls,
+            condition: cond,
+            deadline: block.timestamp + 100,
+            nonce: 1,
+            signature: ""
+        });
+        intent.signature = _signIntent(intent, userPk);
+
+        uint256 userBalBefore = user.balance;
+        uint256 solverBalBefore = solverAddr.balance;
+
+        vm.startPrank(solverAddr);
+        intentContract.fillIntent(intent, "");
         vm.stopPrank();
 
-        // User should have their TAO back
-        assertEq(user.balance, 100 * 1e18); 
+        assertEq(user.balance - userBalBefore, 45 * 1e18); // User gets exact minOutput
+        assertEq(solverAddr.balance - solverBalBefore, 5 * 1e18); // Solver gets the 5 TAO spread
     }
 
+    function test_SwapAlphaSuccess() public {
+        bytes32 targetHotkey = keccak256("target_hotkey");
+        uint16 targetNetuid = 2;
+        
+        MockStakingPrecompile(payable(ISTAKING_ADDRESS)).setStake(testHotkey, testNetuid, 50 * 1e9);
 
+        Call[] memory calls = new Call[](2);
+        // Call 1: Unstake from source
+        calls[0] = Call({
+            target: ISTAKING_ADDRESS,
+            value: 0,
+            callData: abi.encodeWithSelector(IStaking.removeStake.selector, testHotkey, 50 * 1e9, testNetuid)
+        });
+        // Call 2: Stake to target (uses the 50 TAO generated from Call 1)
+        calls[1] = Call({
+            target: ISTAKING_ADDRESS,
+            value: 50 * 1e18,
+            callData: abi.encodeWithSelector(IStaking.addStake.selector, targetHotkey, 50 * 1e9, targetNetuid)
+        });
 
-    function test_SellAlphaRevertsIfPrecompileFails() public {
-        vm.startPrank(user);
-        intentContract.buyAlpha{value: 50 * 1e18}(50 * 1e18, 50 * 1e9, testHotkey, testNetuid);
+        Condition memory cond = Condition({
+            asset: AssetType.ALPHA,
+            minOutput: 50 * 1e9, 
+            hotkey: targetHotkey,
+            netuid: targetNetuid
+        });
 
-        MockStakingPrecompile(payable(ISTAKING_ADDRESS)).setShouldFail(true);
+        Intent memory intent = Intent({
+            user: user,
+            calls: calls,
+            condition: cond,
+            deadline: block.timestamp + 100,
+            nonce: 1,
+            signature: ""
+        });
+        intent.signature = _signIntent(intent, userPk);
 
-        vm.expectRevert("removeStake precompile call failed");
-        intentContract.sellAlpha(50 * 1e9, 50 * 1e18, testHotkey, testNetuid);
+        vm.startPrank(solverAddr);
+        intentContract.fillIntent(intent, "");
         vm.stopPrank();
-    }
 
-    function test_SellAlphaRevertsOnSlippage() public {
-        vm.startPrank(user);
-        intentContract.buyAlpha{value: 50 * 1e18}(50 * 1e18, 50 * 1e9, testHotkey, testNetuid);
-
-        MockStakingPrecompile(payable(ISTAKING_ADDRESS)).setSlippageSimulation(true);
-
-        // Expecting 50 TAO, but mock only mints 25 (simulated slippage)
-        vm.expectRevert("Slippage: Received less TAO than expected");
-        intentContract.sellAlpha(50 * 1e9, 50 * 1e18, testHotkey, testNetuid);
-        vm.stopPrank();
+        assertEq(MockStakingPrecompile(payable(ISTAKING_ADDRESS)).getTotalAlphaStaked(targetHotkey, targetNetuid), 50 * 1e9);
+        assertEq(MockStakingPrecompile(payable(ISTAKING_ADDRESS)).getTotalAlphaStaked(testHotkey, testNetuid), 0);
     }
 }
