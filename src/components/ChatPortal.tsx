@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import type { FunctionDeclaration, ChatSession, GenerateContentResult } from '@google/generative-ai';
-import { Send, Bot, ArrowRightLeft, ShieldAlert, Activity } from 'lucide-react';
+import { Send, Bot, ArrowRightLeft, ShieldAlert, Activity, User } from 'lucide-react';
 
 interface ChatPortalProps {
   account: string;
@@ -189,10 +189,11 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
   };
 
   return (
-    <div className="glass-panel" style={{ height: '600px', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+    <div className="glass-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: '20px', borderBottom: '1px solid var(--border-subtle)', background: 'rgba(0,0,0,0.2)' }}>
         <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Bot color="var(--accent-secondary)" size={24} /> SyncIntent OS Agent
+          {account && <span className="status-indicator"></span>}
         </h3>
       </div>
 
@@ -207,65 +208,80 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
         {account && messages.map((msg, idx) => (
           <div key={idx} style={{
             display: 'flex',
-            flexDirection: 'column',
-            alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start'
+            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+            gap: '12px',
+            marginBottom: '4px'
           }}>
-            <div style={{
-              maxWidth: '80%',
-              padding: '12px 16px',
-              borderRadius: '12px',
-              background: msg.role === 'user' ? 'rgba(138, 43, 226, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-              border: msg.role === 'user' ? '1px solid rgba(138, 43, 226, 0.4)' : '1px solid var(--border-subtle)',
-              borderBottomRightRadius: msg.role === 'user' ? '4px' : '12px',
-              borderBottomLeftRadius: msg.role === 'model' ? '4px' : '12px',
-              color: 'var(--text-primary)',
-              lineHeight: 1.5,
-              fontSize: '14px'
-            }}>
-              {msg.text}
-            </div>
+            {msg.role === 'model' && (
+              <div style={{ flexShrink: 0, width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(14, 165, 233, 0.1)', color: 'var(--accent-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(14, 165, 233, 0.2)' }}>
+                <Bot size={18} />
+              </div>
+            )}
+            
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '75%' }}>
+              <div style={{
+                padding: '14px 18px',
+                borderRadius: '16px',
+                background: msg.role === 'user' ? 'linear-gradient(135deg, var(--accent-primary), #4f46e5)' : 'rgba(255, 255, 255, 0.05)',
+                border: msg.role === 'user' ? 'none' : '1px solid var(--border-subtle)',
+                borderBottomRightRadius: msg.role === 'user' ? '4px' : '16px',
+                borderBottomLeftRadius: msg.role === 'model' ? '4px' : '16px',
+                color: msg.role === 'user' ? '#ffffff' : 'var(--text-primary)',
+                lineHeight: 1.6,
+                fontSize: '14.5px',
+                boxShadow: msg.role === 'user' ? '0 4px 14px rgba(99, 102, 241, 0.2)' : 'none'
+              }}>
+                {msg.text}
+              </div>
 
-            {msg.action && (
-              <div style={{ marginTop: '12px', width: '100%', maxWidth: '300px' }} className="glass-panel">
-                <div style={{ padding: '16px' }}>
-                  <h4 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>
-                    {msg.action.type === 'stake' ? 'Stake Confirmation' : 'Unstake Confirmation'}
-                  </h4>
-                  {msg.action.type === 'stake' && (
-                    <div style={{ marginBottom: '16px', fontSize: '13px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                        <span className="text-muted">Amount</span>
-                        <span className="mono">{msg.action.amount} TAO</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span className="text-muted">Netuid</span>
-                        <span className="mono">{msg.action.netuid}</span>
-                      </div>
-                    </div>
-                  )}
-                  {msg.action.type === 'unstake' && (
-                    <div style={{ marginBottom: '16px', fontSize: '13px' }}>
-                      {msg.action.amount && (
+              {msg.action && (
+                <div style={{ marginTop: '12px', width: '100%', minWidth: '280px' }} className="glass-panel">
+                  <div style={{ padding: '16px' }}>
+                    <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--text-primary)' }}>
+                      {msg.action.type === 'stake' ? 'Stake Confirmation' : 'Unstake Confirmation'}
+                    </h4>
+                    {msg.action.type === 'stake' && (
+                      <div style={{ marginBottom: '16px', fontSize: '13px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                           <span className="text-muted">Amount</span>
-                          <span className="mono">{msg.action.amount} Alpha</span>
+                          <span className="mono">{msg.action.amount} TAO</span>
                         </div>
-                      )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span className="text-muted">Netuid</span>
-                        <span className="mono">{msg.action.netuid}</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span className="text-muted">Netuid</span>
+                          <span className="mono">{msg.action.netuid}</span>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  <button
-                    className="btn btn-primary"
-                    style={{ width: '100%', padding: '8px' }}
-                    onClick={() => msg.action && handleAction(msg.action)}
-                    disabled={status.type === 'loading'}
-                  >
-                    <ArrowRightLeft size={14} /> {msg.action.type === 'stake' ? 'Execute Stake' : 'Execute Unstake'}
-                  </button>
+                    )}
+                    {msg.action.type === 'unstake' && (
+                      <div style={{ marginBottom: '16px', fontSize: '13px' }}>
+                        {msg.action.amount && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <span className="text-muted">Amount</span>
+                            <span className="mono">{msg.action.amount} Alpha</span>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span className="text-muted">Netuid</span>
+                          <span className="mono">{msg.action.netuid}</span>
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: '100%', padding: '10px', fontSize: '13px' }}
+                      onClick={() => msg.action && handleAction(msg.action)}
+                      disabled={status.type === 'loading'}
+                    >
+                      <ArrowRightLeft size={14} /> {msg.action.type === 'stake' ? 'Execute Stake' : 'Execute Unstake'}
+                    </button>
+                  </div>
                 </div>
+              )}
+            </div>
+
+            {msg.role === 'user' && (
+              <div style={{ flexShrink: 0, width: '36px', height: '36px', borderRadius: '50%', background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-subtle)' }}>
+                <User size={18} color="var(--text-secondary)" />
               </div>
             )}
           </div>

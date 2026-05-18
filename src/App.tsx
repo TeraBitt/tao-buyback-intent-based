@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
-import { Shield, Wallet, ArrowRightLeft, Activity, AlertCircle, History } from 'lucide-react';
+import { Wallet, ArrowRightLeft, Activity, AlertCircle, History, ShieldAlert } from 'lucide-react';
 import { CONFIG } from './config';
 import abiData from './abi.json';
 import './index.css';
@@ -28,8 +28,8 @@ function App() {
   const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null);
   const [account, setAccount] = useState<string>('');
   const [balance, setBalance] = useState<string>('0');
-  const [totalAlphaStaked, setTotalAlphaStaked] = useState<string>('0');
   const [myAlphaBalance, setMyAlphaBalance] = useState<string>('0');
+  const [totalAlphaStaked, setTotalAlphaStaked] = useState<string>('0');
   const [allAlphaBalances, setAllAlphaBalances] = useState<{ [id: number]: string }>({});
   const [stakeHistory, setStakeHistory] = useState<StakeEvent[]>([]);
 
@@ -182,7 +182,7 @@ function App() {
       setAccount(address);
       await fetchStats(prov, address);
 
-      setStatus({ type: 'success', msg: 'Connected successfully' });
+      setStatus({ type: 'idle', msg: '' });
     } catch (err: any) {
       console.error(err);
       setStatus({ type: 'error', msg: err.message || 'Failed to connect' });
@@ -203,6 +203,7 @@ function App() {
           setProvider(null);
           setStatus({ type: 'idle', msg: '' });
           setBalance('0');
+          // reset alpha balance on disconnect
           setTotalAlphaStaked('0');
           setMyAlphaBalance('0');
           setStakeHistory([]);
@@ -287,39 +288,41 @@ function App() {
   return (
     <>
       <header className="app-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <Shield color="var(--accent-primary)" size={28} />
-            <h2 style={{ margin: 0 }}>SyncIntent<span className="text-accent-gradient"> OS</span></h2>
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'linear-gradient(135deg, var(--accent-primary), #4f46e5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Activity size={18} color="white" />
           </div>
-          
-          <nav style={{ display: 'flex', gap: '8px' }}>
-            <a href="#" className={`nav-link ${activeTab === 'staking' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('staking'); }}>Staking</a>
-            <a href="#" className={`nav-link ${activeTab === 'chat' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('chat'); }}>Chat portal</a>
-          </nav>
+          <span style={{ fontWeight: 700, fontSize: '18px', letterSpacing: '-0.03em' }}>terabitt</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} className="text-sm">
-            <span className={`status-indicator ${account ? '' : 'offline'}`}></span>
-            {account ? 'Connected to subEVM' : 'Disconnected'}
-          </div>
-          {!account ? (
-            <button className="btn btn-primary" onClick={connectWallet}>
-              <Wallet size={16} /> Connect Wallet
-            </button>
-          ) : (
-            <div className="glass-panel" style={{ padding: '6px 12px', fontSize: '14px' }}>
-              <span className="mono">{account.substring(0, 6)}...{account.substring(38)}</span>
+
+        {/* Center Nav */}
+        <nav style={{ display: 'flex', gap: '4px', background: 'rgba(255,255,255,0.04)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
+          <a href="#" className={`nav-link ${activeTab === 'staking' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('staking'); }}>Staking</a>
+          <a href="#" className={`nav-link ${activeTab === 'chat' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('chat'); }}>AI Agent</a>
+        </nav>
+
+        {/* Wallet */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {account ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', background: 'rgba(16, 185, 129, 0.08)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+              <span className="status-indicator"></span>
+              <span className="mono text-sm">{account.substring(0, 6)}...{account.substring(38)}</span>
             </div>
+          ) : (
+            <button className="btn btn-primary" onClick={connectWallet}>
+              <Wallet size={15} /> Connect Wallet
+            </button>
           )}
         </div>
       </header>
 
-      <main className="container">
+      <main className={activeTab === 'chat' ? 'chat-container' : 'container'}>
+        {/* Page Title */}
         {activeTab === 'staking' && (
-          <div style={{ textAlign: 'center', marginBottom: '48px' }}>
-            <h1>Synchronous <span className="text-accent-gradient">Staking</span></h1>
-            <p style={{ color: 'var(--text-secondary)' }}>Native TAO intent execution architecture.</p>
+          <div style={{ marginBottom: '32px' }}>
+            <h1 style={{ fontSize: '28px', fontWeight: 700, letterSpacing: '-0.03em', marginBottom: '6px' }}>Staking <span className="text-accent-gradient">Dashboard</span></h1>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Stake TAO to earn Alpha on your chosen subnet.</p>
           </div>
         )}
 
@@ -339,95 +342,79 @@ function App() {
 
         {activeTab === 'staking' ? (
           <>
-            {account && (
-              <div className="glass-panel" style={{ padding: '24px', marginBottom: '32px', display: 'flex', gap: '48px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <div>
-              <p className="text-sm text-muted" style={{ marginBottom: '4px' }}>Wallet Balance</p>
-              <h2 style={{ margin: 0, fontSize: '32px' }} className="mono">{parseFloat(balance).toFixed(4)} <span className="text-sm text-muted">TAO</span></h2>
+            {account ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '32px' }}>
+                <div className="glass-panel" style={{ padding: '20px 24px' }}>
+                  <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>TAO Balance</p>
+                  <p className="mono" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{parseFloat(balance).toFixed(4)} <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>TAO</span></p>
+                </div>
+                <div className="glass-panel" style={{ padding: '20px 24px', borderColor: 'rgba(99,102,241,0.2)' }}>
+                  <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>Your Alpha (Netuid {netuid})</p>
+                  <p className="mono text-accent-gradient" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{myAlphaBalance} <span style={{ fontSize: '13px', WebkitTextFillColor: 'var(--text-muted)', fontWeight: 400 }}>ALPHA</span></p>
+                </div>
+                <div className="glass-panel" style={{ padding: '20px 24px' }}>
+                  <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>Global Hotkey (Netuid {CONFIG.DEFAULT_NETUID})</p>
+                  <p className="mono" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{totalAlphaStaked} <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>ALPHA</span></p>
+                </div>
+              </div>
+            ) : (
+              <div className="glass-panel" style={{ padding: '64px', textAlign: 'center' }}>
+                <ShieldAlert size={56} style={{ margin: '0 auto 20px', opacity: 0.3, color: 'var(--text-muted)', display: 'block' }} />
+                <h2 style={{ fontWeight: 600, marginBottom: '12px', fontSize: '22px' }}>Connect Your Wallet</h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '28px', fontSize: '15px' }}>Connect MetaMask to access the Terabitt staking platform.</p>
+                <button className="btn btn-primary" style={{ padding: '12px 28px', fontSize: '15px' }} onClick={connectWallet}>
+                  <Wallet size={16} /> Connect Wallet
+                </button>
+              </div>
+            )}
+
+        {account && (
+          <div className="grid-cols-2">
+            {/* Add Stake Panel */}
+            <div className="glass-panel" style={{ padding: '28px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                <ArrowRightLeft size={18} color="var(--accent-primary)" />
+                <h3 style={{ margin: 0, fontWeight: 600 }}>Add Stake</h3>
+              </div>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Deposit TAO to receive Alpha on a subnet.</p>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Subnet (Netuid)</label>
+                <input type="number" className="input-field" value={netuid} onChange={(e) => setNetuid(Number(e.target.value))} />
+              </div>
+              <div style={{ marginBottom: '24px' }}>
+                <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>TAO</span></label>
+                <input type="number" className="input-field" placeholder="0.00" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} />
+              </div>
+              <button className="btn btn-primary" style={{ width: '100%', padding: '13px' }} disabled={!account || !stakeAmount || status.type === 'loading'} onClick={handleBuyAlpha}>
+                <ArrowRightLeft size={16} /> Stake TAO
+              </button>
             </div>
-            <div style={{ width: '1px', height: '40px', background: 'var(--border-subtle)' }}></div>
-            <div>
-              <p className="text-sm text-muted" style={{ marginBottom: '4px' }}>Your Staked Alpha (Netuid {netuid})</p>
-              <h2 style={{ margin: 0, fontSize: '32px' }} className="mono text-accent-gradient">
-                {myAlphaBalance} <span className="text-sm text-muted" style={{ WebkitTextFillColor: 'var(--text-muted)' }}>ALPHA</span>
-              </h2>
-            </div>
-            <div style={{ width: '1px', height: '40px', background: 'var(--border-subtle)' }}></div>
-            <div>
-              <p className="text-sm text-muted" style={{ marginBottom: '4px' }}>Global Hotkey Alpha (Netuid {CONFIG.DEFAULT_NETUID})</p>
-              <h2 style={{ margin: 0, fontSize: '24px' }} className="mono">{totalAlphaStaked} <span className="text-sm text-muted">ALPHA</span></h2>
+
+            {/* Remove Stake Panel */}
+            <div className="glass-panel" style={{ padding: '28px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                <ArrowRightLeft size={18} color="var(--accent-secondary)" />
+                <h3 style={{ margin: 0, fontWeight: 600 }}>Remove Stake</h3>
+              </div>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Convert Alpha back to TAO. Leave blank to unstake all.</p>
+
+              <div style={{ marginBottom: '24px' }}>
+                <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span></label>
+                <input type="number" className="input-field" placeholder={`Max: ${myAlphaBalance}`} value={unstakeAmount} onChange={(e) => setUnstakeAmount(e.target.value)} />
+              </div>
+
+              <div style={{ marginBottom: '24px', padding: '14px', background: 'rgba(14,165,233,0.05)', borderRadius: '10px', border: '1px solid rgba(14,165,233,0.15)' }}>
+                <p className="text-sm" style={{ color: 'var(--accent-secondary)', marginBottom: '4px', fontWeight: 500 }}>How it works</p>
+                <p className="text-sm" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Burns Alpha and atomically returns native TAO to your wallet via the staking precompile.</p>
+              </div>
+
+              <button className="btn btn-secondary" style={{ width: '100%', padding: '13px' }} disabled={!account || status.type === 'loading' || myAlphaBalance === '0.0000'} onClick={handleUnstake}>
+                <ArrowRightLeft size={16} /> {unstakeAmount ? 'Unstake Alpha' : 'Unstake All Alpha'}
+              </button>
             </div>
           </div>
         )}
-
-        <div className="grid-cols-2">
-          {/* Add Stake Panel */}
-          <div className="glass-panel" style={{ padding: '32px' }}>
-            <h3 style={{ marginBottom: '8px' }}>Add Stake</h3>
-            <p className="text-sm text-muted" style={{ marginBottom: '24px' }}>Deposit TAO to mint Alpha</p>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label className="text-sm text-muted" style={{ display: 'block', marginBottom: '8px' }}>Netuid</label>
-              <input
-                type="number"
-                className="input-field"
-                value={netuid}
-                onChange={(e) => setNetuid(Number(e.target.value))}
-              />
-            </div>
-
-            <div style={{ marginBottom: '24px' }}>
-              <label className="text-sm text-muted" style={{ display: 'block', marginBottom: '8px' }}>Amount (TAO)</label>
-              <input
-                type="number"
-                className="input-field"
-                placeholder="0.00"
-                value={stakeAmount}
-                onChange={(e) => setStakeAmount(e.target.value)}
-              />
-            </div>
-
-            <button
-              className="btn btn-primary"
-              style={{ width: '100%' }}
-              disabled={!account || !stakeAmount || status.type === 'loading'}
-              onClick={handleBuyAlpha}
-            >
-              <ArrowRightLeft size={16} /> Stake TAO
-            </button>
-          </div>
-
-          {/* Remove Stake Panel */}
-          <div className="glass-panel" style={{ padding: '32px' }}>
-            <h3 style={{ marginBottom: '8px' }}>Remove Stake</h3>
-            <p className="text-sm text-muted" style={{ marginBottom: '24px' }}>Unstake Alpha and withdraw TAO from Netuid {netuid}</p>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label className="text-sm text-muted" style={{ display: 'block', marginBottom: '8px' }}>Amount (Alpha)</label>
-              <input
-                type="number"
-                className="input-field"
-                placeholder="Leave blank for MAX"
-                value={unstakeAmount}
-                onChange={(e) => setUnstakeAmount(e.target.value)}
-              />
-            </div>
-
-            <div style={{ marginBottom: '24px', padding: '16px', background: 'rgba(0,229,255,0.05)', borderRadius: '8px', border: '1px solid rgba(0,229,255,0.15)' }}>
-              <p className="text-sm" style={{ color: 'var(--accent-secondary)', marginBottom: '4px' }}>How it works</p>
-              <p className="text-sm text-muted">Burns staked Alpha on the selected hotkey and converts it back to native TAO atomically. Leave amount blank to unstake all.</p>
-            </div>
-
-            <button
-              className="btn btn-secondary"
-              style={{ width: '100%' }}
-              disabled={!account || status.type === 'loading' || myAlphaBalance === '0.0000'}
-              onClick={handleUnstake}
-            >
-              <ArrowRightLeft size={16} /> {unstakeAmount ? 'Unstake Alpha' : 'Unstake All Alpha'}
-            </button>
-          </div>
-        </div>
 
         {/* Transaction History */}
         {account && stakeHistory.length > 0 && (
@@ -454,11 +441,11 @@ function App() {
                       <td style={{ padding: '10px 12px' }}>
                         <span style={{
                           padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '11px',
-                          fontWeight: 600,
+                          borderRadius: '8px', 
+                          border: '1px solid var(--border-subtle)',
                           background: ev.type === 'stake' ? 'rgba(0,255,136,0.1)' : 'rgba(255,51,102,0.1)',
                           color: ev.type === 'stake' ? 'var(--status-success)' : 'var(--status-error)',
+                          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)'
                         }}>
                           {ev.type === 'stake' ? 'STAKE' : 'UNSTAKE'}
                         </span>
