@@ -218,7 +218,7 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
         await processResponse(result);
         setLoading(false);
       }
-    } else if (action.type === 'swap' && action.targetNetuid && action.amount && chatSession) {
+    } else if (action.type === 'swap' && action.targetNetuid !== undefined && action.amount && chatSession) {
       const success = await executeSwap(action.netuid, action.targetNetuid, action.amount);
       if (success) {
         setMessages(prev => [...prev, { role: 'user', text: `[System] Confirmed Swap of ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid}.` }]);
