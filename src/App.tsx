@@ -162,10 +162,10 @@ function App() {
       const hotkey = getHotkeyForNetuid(netuid);
       try {
         const alpha = await stakingPrecompile.getTotalAlphaStaked(hotkey, netuid);
-        setTotalAlphaStaked((Number(alpha) / 1e9).toFixed(4));
+        setTotalAlphaStaked((Number(alpha) / 1e9).toString());
       } catch (e) {
         console.error('getTotalAlphaStaked failed:', e);
-        setTotalAlphaStaked('0.0000');
+        setTotalAlphaStaked('0');
       }
 
       // Fetch REAL on-chain alpha balance for the contract's coldkey.
@@ -184,10 +184,10 @@ function App() {
       const contractColdkey = '0x' + Array.from(hashBytes).map(b => b.toString(16).padStart(2, '0')).join('');
       try {
         const myStake = await stakingPrecompile.getStake(hotkey, contractColdkey, netuid);
-        setMyAlphaBalance((Number(myStake) / 1e9).toFixed(4));
+        setMyAlphaBalance((Number(myStake) / 1e9).toString());
       } catch (e) {
         console.error('getStake failed:', e);
-        setMyAlphaBalance('0.0000');
+        setMyAlphaBalance('0');
       }
 
       // Also check a few common netuids for the "all balances" map (parallelized, deduplicated)
@@ -198,9 +198,9 @@ function App() {
         try {
           const hk = getHotkeyForNetuid(checkNetuid);
           const stake = await stakingPrecompile.getStake(hk, contractColdkey, checkNetuid);
-          balances[checkNetuid] = (Number(stake) / 1e9).toFixed(4);
+          balances[checkNetuid] = (Number(stake) / 1e9).toString();
         } catch {
-          balances[checkNetuid] = '0.0000';
+          balances[checkNetuid] = '0';
         }
       }));
       setAllAlphaBalances(balances);
@@ -536,6 +536,25 @@ function App() {
 
       const amountInRao = ethers.parseUnits(amount, 9);
 
+      // Fetch dynamic Alpha price on the source subnet to determine how much TAO we will get back.
+      // We query this via our global directProvider to avoid MetaMask filtering custom Substrate RPC methods.
+      let priceInRao = 1000000000n; // Default 1:1 fallback if query fails
+      try {
+        setStatus({ type: 'loading', msg: 'Fetching Alpha spot exchange rate...' });
+        const priceRes = await directProvider.send("swap_currentAlphaPrice", [sourceNetuid]);
+        if (priceRes) {
+          priceInRao = BigInt(priceRes);
+        }
+      } catch (err) {
+        console.error("Failed to query swap_currentAlphaPrice:", err);
+      }
+
+      // Calculate expected TAO returned with a 5% slippage buffer.
+      // Any unspent TAO is automatically swept back to the user's wallet by the contract.
+      const expectedTaoInRao = (amountInRao * priceInRao * 950n) / (1000n * 1000000000n);
+
+      setStatus({ type: 'loading', msg: 'Preparing Swap Intent...' });
+
       // Encode Staking Precompile calls
       const stakingInterface = new ethers.Interface([
         "function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
@@ -559,7 +578,7 @@ function App() {
           value: 0n,
           callData: stakingInterface.encodeFunctionData("addStake", [
             targetHotkey,
-            amountInRao,
+            expectedTaoInRao, // Dynamic and correct TAO amount
             targetNetuid
           ])
         }
@@ -608,8 +627,13 @@ function App() {
   };
 
   const handleSwap = async () => {
+    const amountToSwap = swapAmount !== '' ? swapAmount : (allAlphaBalances[swapSourceNetuid] || '0');
+    if (!amountToSwap || parseFloat(amountToSwap) <= 0) {
+      setStatus({ type: 'error', msg: 'Please enter a valid amount of ALPHA to swap.' });
+      return;
+    }
     const hotkey = getHotkeyForNetuid(swapSourceNetuid);
-    if (await executeSwap(swapSourceNetuid, swapTargetNetuid, hotkey, swapAmount)) {
+    if (await executeSwap(swapSourceNetuid, swapTargetNetuid, hotkey, amountToSwap)) {
       setSwapAmount('');
     }
   };
@@ -689,11 +713,11 @@ function App() {
                 </div>
                 <div className="glass-panel" style={{ padding: '20px 24px', borderColor: 'rgba(99,102,241,0.2)' }}>
                   <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>Your Alpha (Netuid {netuid})</p>
-                  <p className="mono text-accent-gradient" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{myAlphaBalance} <span style={{ fontSize: '13px', WebkitTextFillColor: 'var(--text-muted)', fontWeight: 400 }}>ALPHA</span></p>
+                  <p className="mono text-accent-gradient" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{parseFloat(myAlphaBalance).toFixed(4)} <span style={{ fontSize: '13px', WebkitTextFillColor: 'var(--text-muted)', fontWeight: 400 }}>ALPHA</span></p>
                 </div>
                 <div className="glass-panel" style={{ padding: '20px 24px' }}>
                   <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>Global Hotkey (Netuid {CONFIG.DEFAULT_NETUID})</p>
-                  <p className="mono" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{totalAlphaStaked} <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>ALPHA</span></p>
+                  <p className="mono" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{parseFloat(totalAlphaStaked).toFixed(4)} <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>ALPHA</span></p>
                 </div>
               </div>
             ) : (
@@ -750,12 +774,36 @@ function App() {
               </div>
 
               <div style={{ marginBottom: '24px' }}>
-                <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span></label>
-                <input type="number" className="input-field" placeholder="0.00" value={swapAmount} onChange={(e) => setSwapAmount(e.target.value)} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <label className="text-sm" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
+                    Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span>
+                  </label>
+                  {account && (
+                    <span 
+                      className="text-xs text-accent" 
+                      style={{ cursor: 'pointer', textDecoration: 'underline' }} 
+                      onClick={() => setSwapAmount(allAlphaBalances[swapSourceNetuid] || '0')}
+                    >
+                      Max: {allAlphaBalances[swapSourceNetuid] ? parseFloat(allAlphaBalances[swapSourceNetuid]).toFixed(4) : '0.0000'}
+                    </span>
+                  )}
+                </div>
+                <input 
+                  type="number" 
+                  className="input-field" 
+                  placeholder={allAlphaBalances[swapSourceNetuid] && parseFloat(allAlphaBalances[swapSourceNetuid]) > 0 ? `Max: ${parseFloat(allAlphaBalances[swapSourceNetuid]).toFixed(4)}` : "0.00"} 
+                  value={swapAmount} 
+                  onChange={(e) => setSwapAmount(e.target.value)} 
+                />
               </div>
 
-              <button className="btn btn-primary" style={{ width: '100%', padding: '13px' }} disabled={!account || !swapAmount || status.type === 'loading'} onClick={handleSwap}>
-                <ArrowRightLeft size={16} /> Swap Stake
+              <button 
+                className="btn btn-primary" 
+                style={{ width: '100%', padding: '13px' }} 
+                disabled={!account || status.type === 'loading' || (swapAmount === '' && (!allAlphaBalances[swapSourceNetuid] || parseFloat(allAlphaBalances[swapSourceNetuid]) === 0))} 
+                onClick={handleSwap}
+              >
+                <ArrowRightLeft size={16} /> {swapAmount ? 'Swap Stake' : 'Swap All Alpha'}
               </button>
             </div>
 
@@ -773,7 +821,7 @@ function App() {
               </div>
               <div style={{ marginBottom: '24px' }}>
                 <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span></label>
-                <input type="number" className="input-field" placeholder={`Max: ${myAlphaBalance}`} value={unstakeAmount} onChange={(e) => setUnstakeAmount(e.target.value)} />
+                <input type="number" className="input-field" placeholder={`Max: ${parseFloat(myAlphaBalance).toFixed(4)}`} value={unstakeAmount} onChange={(e) => setUnstakeAmount(e.target.value)} />
               </div>
 
               <div style={{ marginBottom: '24px', padding: '14px', background: 'rgba(14,165,233,0.05)', borderRadius: '10px', border: '1px solid rgba(14,165,233,0.15)' }}>
@@ -781,7 +829,7 @@ function App() {
                 <p className="text-sm" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Burns Alpha and atomically returns native TAO to your wallet via the staking precompile.</p>
               </div>
 
-              <button className="btn btn-secondary" style={{ width: '100%', padding: '13px' }} disabled={!account || status.type === 'loading' || myAlphaBalance === '0.0000'} onClick={handleUnstake}>
+              <button className="btn btn-secondary" style={{ width: '100%', padding: '13px' }} disabled={!account || status.type === 'loading' || !(allAlphaBalances[unstakeNetuid] && parseFloat(allAlphaBalances[unstakeNetuid]) > 0)} onClick={handleUnstake}>
                 <ArrowRightLeft size={16} /> {unstakeAmount ? 'Unstake Alpha' : 'Unstake All Alpha'}
               </button>
             </div>
