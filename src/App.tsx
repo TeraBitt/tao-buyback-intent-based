@@ -47,7 +47,119 @@ function App() {
   const [myAlphaBalance, setMyAlphaBalance] = useState<string>('0');
   const [totalAlphaStaked, setTotalAlphaStaked] = useState<string>('0');
   const [allAlphaBalances, setAllAlphaBalances] = useState<{ [id: number]: string }>({});
+  const [stakedHotkeys, setStakedHotkeys] = useState<{ [netuid: number]: string }>({});
   const [stakeHistory, setStakeHistory] = useState<StakeEvent[]>([]);
+
+  const decodeDelegations = (scaleBytes: any): { netuid: number; stake: number; hotkey: string }[] => {
+    if (!scaleBytes) return [];
+    let bytes: Uint8Array;
+    if (typeof scaleBytes === 'string') {
+      const hex = scaleBytes.replace('0x', '');
+      const arr = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < hex.length; i += 2) {
+        arr[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+      }
+      bytes = arr;
+    } else if (Array.isArray(scaleBytes)) {
+      bytes = new Uint8Array(scaleBytes);
+    } else {
+      bytes = new Uint8Array(scaleBytes as any);
+    }
+
+    const offset = { value: 0 };
+
+    const readCompact = (bytes: Uint8Array, offset: { value: number }): bigint => {
+      const first = bytes[offset.value++];
+      const mode = first & 0x03;
+      if (mode === 0) {
+        return BigInt(first >> 2);
+      } else if (mode === 1) {
+        const second = bytes[offset.value++];
+        return BigInt((first >> 2) | (second << 6));
+      } else if (mode === 2) {
+        const b1 = bytes[offset.value++];
+        const b2 = bytes[offset.value++];
+        const b3 = bytes[offset.value++];
+        const val = (first >> 2) | (b1 << 6) | (b2 << 14) | (b3 << 22);
+        return BigInt(val >>> 0);
+      } else {
+        const len = (first >> 2) + 4;
+        let val = 0n;
+        for (let i = 0; i < len; i++) {
+          val |= BigInt(bytes[offset.value++]) << BigInt(i * 8);
+        }
+        return val;
+      }
+    };
+
+    const bytesToHex = (bytes: Uint8Array): string => {
+      return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    };
+
+    try {
+      const len = Number(readCompact(bytes, offset));
+      const results: { netuid: number; stake: number; hotkey: string }[] = [];
+
+      for (let k = 0; k < len; k++) {
+        // 1. delegate_ss58: 32 bytes
+        const delegateHotkey = bytesToHex(bytes.slice(offset.value, offset.value + 32));
+        offset.value += 32;
+
+        // 2. take: Compact<u16>
+        readCompact(bytes, offset);
+
+        // 3. nominators: Vec
+        const nominatorsLen = Number(readCompact(bytes, offset));
+        for (let i = 0; i < nominatorsLen; i++) {
+          offset.value += 32; // nominator AccountId
+          const nominatorStakesLen = Number(readCompact(bytes, offset));
+          for (let j = 0; j < nominatorStakesLen; j++) {
+            readCompact(bytes, offset); // netuid
+            readCompact(bytes, offset); // stake amount
+          }
+        }
+
+        // 4. owner_ss58: 32 bytes
+        offset.value += 32;
+
+        // 5. registrations: Vec<Compact<NetUid>>
+        const regsLen = Number(readCompact(bytes, offset));
+        for (let i = 0; i < regsLen; i++) {
+          readCompact(bytes, offset);
+        }
+
+        // 6. validator_permits: Vec<Compact<NetUid>>
+        const permitsLen = Number(readCompact(bytes, offset));
+        for (let i = 0; i < permitsLen; i++) {
+          readCompact(bytes, offset);
+        }
+
+        // 7. return_per_1000: Compact<u64>
+        readCompact(bytes, offset);
+
+        // 8. total_daily_return: Compact<u64>
+        readCompact(bytes, offset);
+
+        // 9. netuid: Compact<NetUid>
+        const netuid = Number(readCompact(bytes, offset));
+
+        // 10. stake: Compact<AlphaBalance>
+        const stakeRaw = readCompact(bytes, offset);
+        const stake = Number(stakeRaw) / 1e9;
+
+        results.push({
+          netuid,
+          stake,
+          hotkey: delegateHotkey
+        });
+      }
+      return results;
+    } catch (e) {
+      console.error('Failed to decode scale bytes:', e);
+      return [];
+    }
+  };
+
 
   const [stakeAmount, setStakeAmount] = useState<string>('');
   const [unstakeAmount, setUnstakeAmount] = useState<string>('');
@@ -159,8 +271,34 @@ function App() {
       const bal = await prov.getBalance(address);
       setBalance(ethers.formatEther(bal));
 
-      // Fetch global hotkey total alpha
-      const hotkey = getHotkeyForNetuid(netuid);
+      // 1. Calculate coldkeys using blake2b
+      // Contract Coldkey
+      const evmHex = CONFIG.CONTRACT_ADDRESS.replace('0x', '');
+      const evmAddrBytes = new Uint8Array(evmHex.length / 2);
+      for (let i = 0; i < evmHex.length; i += 2) {
+        evmAddrBytes[i / 2] = parseInt(evmHex.substring(i, i + 2), 16);
+      }
+      const prefix = new TextEncoder().encode('evm:');
+      const contractInput = new Uint8Array(prefix.length + evmAddrBytes.length);
+      contractInput.set(prefix);
+      contractInput.set(evmAddrBytes, prefix.length);
+      const contractHashBytes = blake2b(contractInput, undefined, 32);
+      const contractColdkey = '0x' + Array.from(contractHashBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+
+      // Wallet Coldkey
+      const walletHex = address.replace('0x', '');
+      const walletAddrBytes = new Uint8Array(walletHex.length / 2);
+      for (let i = 0; i < walletHex.length; i += 2) {
+        walletAddrBytes[i / 2] = parseInt(walletHex.substring(i, i + 2), 16);
+      }
+      const walletInput = new Uint8Array(prefix.length + walletAddrBytes.length);
+      walletInput.set(prefix);
+      walletInput.set(walletAddrBytes, prefix.length);
+      const walletHashBytes = blake2b(walletInput, undefined, 32);
+      const walletColdkey = '0x' + Array.from(walletHashBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+
+      // 2. Fetch total alpha staked for the selected hotkey/netuid
+      const hotkey = stakedHotkeys[netuid] || getHotkeyForNetuid(netuid);
       try {
         const alpha = await stakingPrecompile.getTotalAlphaStaked(hotkey, netuid);
         setTotalAlphaStaked((Number(alpha) / 1e9).toString());
@@ -169,20 +307,7 @@ function App() {
         setTotalAlphaStaked('0');
       }
 
-      // Fetch REAL on-chain alpha balance for the contract's coldkey.
-      // Bittensor maps EVM addresses → substrate AccountId32 via blake2_256("evm:" + address).
-      // This is the HashedAddressMapping used by the staking precompile.
-      const evmHex = CONFIG.CONTRACT_ADDRESS.replace('0x', '');
-      const evmAddrBytes = new Uint8Array(evmHex.length / 2);
-      for (let i = 0; i < evmHex.length; i += 2) {
-        evmAddrBytes[i / 2] = parseInt(evmHex.substring(i, i + 2), 16);
-      }
-      const prefix = new TextEncoder().encode('evm:');
-      const input = new Uint8Array(prefix.length + evmAddrBytes.length);
-      input.set(prefix);
-      input.set(evmAddrBytes, prefix.length);
-      const hashBytes = blake2b(input, undefined, 32);
-      const contractColdkey = '0x' + Array.from(hashBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      // 3. Fetch specific getStake balance for contract on currently selected netuid
       try {
         const myStake = await stakingPrecompile.getStake(hotkey, contractColdkey, netuid);
         setMyAlphaBalance((Number(myStake) / 1e9).toString());
@@ -191,24 +316,58 @@ function App() {
         setMyAlphaBalance('0');
       }
 
-      // Also check a few common netuids for the "all balances" map (parallelized, deduplicated)
-      const checkNetuids = Array.from(new Set([0, 1, netuid, 310]));
+      // 4. Fetch all active delegation positions using delegateInfo_getDelegated RPC for contract and wallet!
       const balances: { [id: number]: string } = {};
+      const hotkeysMap: { [id: number]: string } = {};
 
-      await Promise.all(checkNetuids.map(async (checkNetuid) => {
-        try {
-          const hk = getHotkeyForNetuid(checkNetuid);
-          const stake = await stakingPrecompile.getStake(hk, contractColdkey, checkNetuid);
-          balances[checkNetuid] = (Number(stake) / 1e9).toString();
-        } catch {
-          balances[checkNetuid] = '0';
+      const hexToBytes = (hex: string) => {
+        const clean = hex.replace('0x', '');
+        const bytes = [];
+        for (let i = 0; i < clean.length; i += 2) {
+          bytes.push(parseInt(clean.substring(i, i + 2), 16));
         }
-      }));
-      setAllAlphaBalances(balances);
+        return bytes;
+      };
 
-      // Fetch transaction history (for the history table only, NOT for balances)
-      // Paused for now
-      // await fetchStakeHistory(directProvider, address);
+      try {
+        const [contractScaleBytes, walletScaleBytes] = await Promise.all([
+          directProvider.send("delegateInfo_getDelegated", [hexToBytes(contractColdkey)]),
+          directProvider.send("delegateInfo_getDelegated", [hexToBytes(walletColdkey)]).catch(() => [])
+        ]);
+
+        const contractPositions = decodeDelegations(contractScaleBytes);
+        const walletPositions = decodeDelegations(walletScaleBytes);
+
+        // Merge contract positions
+        for (const pos of contractPositions) {
+          if (pos.stake > 0) {
+            balances[pos.netuid] = pos.stake.toString();
+            hotkeysMap[pos.netuid] = pos.hotkey;
+          }
+        }
+
+        // Merge wallet positions
+        for (const pos of walletPositions) {
+          if (pos.stake > 0) {
+            const existingStake = balances[pos.netuid] ? parseFloat(balances[pos.netuid]) : 0;
+            balances[pos.netuid] = (existingStake + pos.stake).toString();
+            if (!hotkeysMap[pos.netuid]) {
+              hotkeysMap[pos.netuid] = pos.hotkey;
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch/decode active delegation positions:", err);
+      }
+
+      // 5. Ensure the currently selected netuid is always in the balances map
+      if (balances[netuid] === undefined) {
+        balances[netuid] = '0';
+      }
+      
+      setAllAlphaBalances(balances);
+      setStakedHotkeys(hotkeysMap);
+
     } catch (e) {
       console.error(e);
     }
@@ -237,6 +396,8 @@ function App() {
     setTotalAlphaStaked('0');
     setMyAlphaBalance('0');
     setStakeHistory([]);
+    setAllAlphaBalances({});
+    setStakedHotkeys({});
   };
 
   const disconnectWallet = async () => {
@@ -624,14 +785,14 @@ function App() {
   };
 
   const handleBuyAlpha = async () => {
-    const hotkey = getHotkeyForNetuid(netuid);
+    const hotkey = stakedHotkeys[netuid] || getHotkeyForNetuid(netuid);
     if (await executeStake(stakeAmount, netuid, hotkey)) {
       setStakeAmount('');
     }
   };
 
   const handleUnstake = async () => {
-    const hotkey = getHotkeyForNetuid(unstakeNetuid);
+    const hotkey = stakedHotkeys[unstakeNetuid] || getHotkeyForNetuid(unstakeNetuid);
     if (await executeUnstake(unstakeNetuid, hotkey, unstakeAmount)) {
       setUnstakeAmount('');
     }
@@ -643,7 +804,7 @@ function App() {
       setStatus({ type: 'error', msg: 'Please enter a valid amount of ALPHA to swap.' });
       return;
     }
-    const hotkey = getHotkeyForNetuid(swapSourceNetuid);
+    const hotkey = stakedHotkeys[swapSourceNetuid] || getHotkeyForNetuid(swapSourceNetuid);
     if (await executeSwap(swapSourceNetuid, swapTargetNetuid, hotkey, amountToSwap)) {
       setSwapAmount('');
     }

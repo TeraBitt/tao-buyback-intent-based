@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import type { FunctionDeclaration, ChatSession, GenerateContentResult } from '@google/generative-ai';
 import { Send, ArrowRightLeft, ShieldAlert, Activity, User } from 'lucide-react';
@@ -272,8 +273,8 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
                 lineHeight: 1.6,
                 fontSize: '14.5px',
                 boxShadow: msg.role === 'user' ? '0 4px 14px rgba(99, 102, 241, 0.2)' : 'none'
-              }}>
-                {msg.text}
+              }} className="markdown-body">
+                <ReactMarkdown>{msg.text}</ReactMarkdown>
               </div>
 
               {msg.action && (
