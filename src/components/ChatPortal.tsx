@@ -14,6 +14,7 @@ interface ChatPortalProps {
   executeUnstake: (netuid: number, amount?: string) => Promise<boolean>;
   executeSwap: (sourceNetuid: number, targetNetuid: number, amount: string) => Promise<boolean>;
   status: { type: 'idle' | 'loading' | 'success' | 'error', msg: string };
+  openWalletSelector: () => void;
 }
 
 const stakeTool: FunctionDeclaration = {
@@ -76,7 +77,7 @@ interface ChatMessage {
   };
 }
 
-export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaBalances, currentNetuid, executeStake, executeUnstake, executeSwap, status }: ChatPortalProps) {
+export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaBalances, currentNetuid, executeStake, executeUnstake, executeSwap, status, openWalletSelector }: ChatPortalProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -242,9 +243,13 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {!account && (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-            <ShieldAlert size={48} style={{ margin: '0 auto 16px', opacity: 0.5 }} />
-            <p>Please connect your wallet to use the Chat Portal.</p>
+          <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-muted)', maxWidth: '440px', margin: '40px auto' }} className="glass-panel">
+            <ShieldAlert size={48} style={{ margin: '0 auto 16px', color: 'var(--accent-primary)', opacity: 0.8 }} />
+            <h3 style={{ color: 'var(--text-primary)', marginBottom: '8px', fontWeight: 700 }}>AI Agent Offline</h3>
+            <p style={{ marginBottom: '24px', fontSize: '13.5px', lineHeight: 1.6 }}>Please connect your preferred Web3 wallet to start interacting with the Terabitt AI Assistant.</p>
+            <button className="btn btn-primary" style={{ width: '100%', padding: '12px', fontSize: '14px', gap: '8px' }} onClick={openWalletSelector}>
+              Connect Wallet
+            </button>
           </div>
         )}
 
@@ -255,8 +260,8 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
             gap: '12px',
             marginBottom: '4px'
           }}>
-            {msg.role === 'model' && (
-              <div style={{ flexShrink: 0, width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(99, 102, 241, 0.2)', padding: '7px' }}>
+             {msg.role === 'model' && (
+              <div style={{ flexShrink: 0, width: '36px', height: '36px', borderRadius: '50%', background: 'var(--accent-glow-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-highlight)', padding: '7px' }}>
                 <img src="/logo-indigo.png" alt="Terabitt Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
               </div>
             )}
@@ -265,14 +270,14 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
               <div style={{
                 padding: '14px 18px',
                 borderRadius: '16px',
-                background: msg.role === 'user' ? 'linear-gradient(135deg, var(--accent-primary), #4f46e5)' : 'rgba(255, 255, 255, 0.05)',
+                background: msg.role === 'user' ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))' : 'rgba(255, 255, 255, 0.05)',
                 border: msg.role === 'user' ? 'none' : '1px solid var(--border-subtle)',
                 borderBottomRightRadius: msg.role === 'user' ? '4px' : '16px',
                 borderBottomLeftRadius: msg.role === 'model' ? '4px' : '16px',
                 color: msg.role === 'user' ? '#ffffff' : 'var(--text-primary)',
                 lineHeight: 1.6,
                 fontSize: '14.5px',
-                boxShadow: msg.role === 'user' ? '0 4px 14px rgba(99, 102, 241, 0.2)' : 'none'
+                boxShadow: msg.role === 'user' ? '0 4px 14px var(--accent-glow)' : 'none'
               }} className="markdown-body">
                 <ReactMarkdown>{msg.text}</ReactMarkdown>
               </div>

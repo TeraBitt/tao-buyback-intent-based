@@ -1,19 +1,19 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-  --bg-base: #030303;
-  --bg-surface: #0a0a0a;
-  --bg-panel: rgba(15, 15, 18, 0.6);
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-highlight: rgba(99, 102, 241, 0.3);
+  --bg-base: #060709;
+  --bg-surface: #0b0c10;
+  --bg-panel: rgba(14, 15, 20, 0.7);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-highlight: rgba(239, 68, 68, 0.25);
   
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
   
-  --accent-primary: #6366f1; /* Electric Indigo */
-  --accent-glow: rgba(99, 102, 241, 0.3);
-  --accent-secondary: #0ea5e9; /* Sky Blue */
+  --accent-primary: #ef4444; /* Taostats Crimson Red */
+  --accent-glow: rgba(239, 68, 68, 0.25);
+  --accent-secondary: #f97316; /* Vibrant Orange */
   
   --status-success: #10b981;
   --status-error: #ef4444;
@@ -35,8 +35,8 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   background-image: 
-    radial-gradient(circle at 15% 50%, rgba(138, 43, 226, 0.08), transparent 25%),
-    radial-gradient(circle at 85% 30%, rgba(0, 229, 255, 0.05), transparent 25%);
+    radial-gradient(circle at 15% 50%, rgba(239, 68, 68, 0.04), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(249, 115, 22, 0.02), transparent 25%);
   background-attachment: fixed;
 }
 
@@ -92,7 +92,7 @@ h1, h2, h3, h4 {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent-primary), #4f46e5);
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
   color: white;
   box-shadow: 0 4px 14px var(--accent-glow);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -100,7 +100,7 @@ h1, h2, h3, h4 {
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+  box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
   filter: brightness(1.15);
 }
 
@@ -198,8 +198,8 @@ h1, h2, h3, h4 {
 
 .nav-link.active {
   color: var(--text-primary);
-  background: rgba(99, 102, 241, 0.12);
-  border: 1px solid rgba(99, 102, 241, 0.25);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
 }
 
 /* Utilities */
@@ -217,9 +217,9 @@ h1, h2, h3, h4 {
 
 /* Animations */
 @keyframes pulseGlow {
-  0% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.4); }
-  70% { box-shadow: 0 0 0 10px rgba(14, 165, 233, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
 }
 
 .status-indicator {
@@ -272,19 +272,19 @@ h1, h2, h3, h4 {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.25);
+  background: rgba(239, 68, 68, 0.2);
   border-radius: 8px;
   transition: all 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.45);
+  background: rgba(239, 68, 68, 0.45);
 }
 
 /* Firefox compatibility */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(99, 102, 241, 0.25) rgba(0, 0, 0, 0.15);
+  scrollbar-color: rgba(239, 68, 68, 0.2) rgba(0, 0, 0, 0.15);
 }
 
 /* Slide-in notification animation */

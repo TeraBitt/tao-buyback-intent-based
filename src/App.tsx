@@ -49,6 +49,8 @@ function App() {
   const [allAlphaBalances, setAllAlphaBalances] = useState<{ [id: number]: string }>({});
   const [stakedHotkeys, setStakedHotkeys] = useState<{ [netuid: number]: string }>({});
   const [stakeHistory, setStakeHistory] = useState<StakeEvent[]>([]);
+  const [walletType, setWalletType] = useState<'metamask' | 'talisman' | null>(null);
+  const [showWalletModal, setShowWalletModal] = useState(false);
 
   const decodeDelegations = (scaleBytes: any): { netuid: number; stake: number; hotkey: string }[] => {
     if (!scaleBytes) return [];
@@ -398,13 +400,22 @@ function App() {
     setStakeHistory([]);
     setAllAlphaBalances({});
     setStakedHotkeys({});
+    setWalletType(null);
+    localStorage.removeItem('connected_wallet');
   };
 
   const disconnectWallet = async () => {
+    const selectedWallet = walletType || localStorage.getItem('connected_wallet');
     clearWalletState();
     try {
-      if (window.ethereum && window.ethereum.request) {
-        await window.ethereum.request({
+      let ethereumProvider: any = null;
+      if (selectedWallet === 'talisman') {
+        ethereumProvider = (window as any).talismanEth || (window as any).ethereum;
+      } else {
+        ethereumProvider = (window as any).ethereum;
+      }
+      if (ethereumProvider && ethereumProvider.request) {
+        await ethereumProvider.request({
           method: "wallet_revokePermissions",
           params: [{ eth_accounts: {} }]
         });
@@ -414,25 +425,33 @@ function App() {
     }
   };
 
-  const connectWallet = async () => {
-    if (!window.ethereum) {
-      setStatus({ type: 'error', msg: 'MetaMask not installed' });
+  const connectWallet = async (wallet?: 'metamask' | 'talisman') => {
+    const selectedWallet = wallet || (localStorage.getItem('connected_wallet') as 'metamask' | 'talisman') || 'metamask';
+    let ethereumProvider: any = null;
+    if (selectedWallet === 'talisman') {
+      ethereumProvider = (window as any).talismanEth || (window as any).ethereum;
+    } else {
+      ethereumProvider = (window as any).ethereum;
+    }
+
+    if (!ethereumProvider) {
+      setStatus({ type: 'error', msg: `${selectedWallet === 'talisman' ? 'Talisman' : 'MetaMask'} not installed` });
       return;
     }
     try {
-      setStatus({ type: 'loading', msg: 'Connecting...' });
-      const prov = new ethers.BrowserProvider(window.ethereum);
+      setStatus({ type: 'loading', msg: `Connecting to ${selectedWallet === 'talisman' ? 'Talisman' : 'MetaMask'}...` });
+      const prov = new ethers.BrowserProvider(ethereumProvider);
 
       const network = await prov.getNetwork();
       if (network.chainId !== BigInt(CONFIG.NETWORK.chainId)) {
         try {
-          await window.ethereum.request({
+          await ethereumProvider.request({
             method: 'wallet_switchEthereumChain',
             params: [{ chainId: CONFIG.NETWORK.chainId }],
           });
         } catch (switchError: any) {
           if (switchError.code === 4902) {
-            await window.ethereum.request({
+            await ethereumProvider.request({
               method: 'wallet_addEthereumChain',
               params: [CONFIG.NETWORK],
             });
@@ -449,6 +468,9 @@ function App() {
       setProvider(prov);
       setSigner(sig);
       setAccount(address);
+      setWalletType(selectedWallet);
+      localStorage.setItem('connected_wallet', selectedWallet);
+      setShowWalletModal(false);
       await fetchStats(prov, address);
 
       setStatus({ type: 'idle', msg: '' });
@@ -459,9 +481,16 @@ function App() {
   };
 
   useEffect(() => {
-    if (window.ethereum) {
-      connectWallet();
+    const savedWallet = localStorage.getItem('connected_wallet') as 'metamask' | 'talisman' | null;
+    if (savedWallet) {
+      connectWallet(savedWallet);
+    }
 
+    const ethereumProvider = savedWallet === 'talisman'
+      ? ((window as any).talismanEth || (window as any).ethereum)
+      : (window as any).ethereum;
+
+    if (ethereumProvider) {
       const handleAccountsChanged = (accounts: string[]) => {
         if (accounts.length > 0) {
           connectWallet();
@@ -474,13 +503,15 @@ function App() {
         window.location.reload();
       };
 
-      window.ethereum.on('accountsChanged', handleAccountsChanged);
-      window.ethereum.on('chainChanged', handleChainChanged);
+      if (ethereumProvider.on) {
+        ethereumProvider.on('accountsChanged', handleAccountsChanged);
+        ethereumProvider.on('chainChanged', handleChainChanged);
+      }
 
       return () => {
-        if (window.ethereum.removeListener) {
-          window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
-          window.ethereum.removeListener('chainChanged', handleChainChanged);
+        if (ethereumProvider.removeListener) {
+          ethereumProvider.removeListener('accountsChanged', handleAccountsChanged);
+          ethereumProvider.removeListener('chainChanged', handleChainChanged);
         }
       };
     }
@@ -829,7 +860,20 @@ function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {account ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', background: 'rgba(16, 185, 129, 0.08)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                <span style={{
+                  fontSize: '9px',
+                  fontWeight: 700,
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  background: walletType === 'talisman' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(246, 133, 27, 0.15)',
+                  color: walletType === 'talisman' ? '#10B981' : '#F6851B',
+                  border: walletType === 'talisman' ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(246, 133, 27, 0.3)'
+                }}>
+                  {walletType || 'wallet'}
+                </span>
                 <span className="status-indicator"></span>
                 <span className="mono text-sm">{account.substring(0, 6)}...{account.substring(38)}</span>
               </div>
@@ -843,7 +887,7 @@ function App() {
               </button>
             </div>
           ) : (
-            <button className="btn btn-primary" onClick={connectWallet}>
+            <button className="btn btn-primary" onClick={() => setShowWalletModal(true)}>
               <Wallet size={15} /> Connect Wallet
             </button>
           )}
@@ -881,7 +925,7 @@ function App() {
                   <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>TAO Balance</p>
                   <p className="mono" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{parseFloat(balance).toFixed(4)} <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>TAO</span></p>
                 </div>
-                <div className="glass-panel" style={{ padding: '20px 24px', borderColor: 'rgba(99,102,241,0.2)' }}>
+                <div className="glass-panel" style={{ padding: '20px 24px', borderColor: 'var(--border-highlight)' }}>
                   <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>Your Alpha (Netuid {netuid})</p>
                   <p className="mono text-accent-gradient" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{parseFloat(myAlphaBalance).toFixed(4)} <span style={{ fontSize: '13px', WebkitTextFillColor: 'var(--text-muted)', fontWeight: 400 }}>ALPHA</span></p>
                 </div>
@@ -891,13 +935,98 @@ function App() {
                 </div>
               </div>
             ) : (
-              <div className="glass-panel" style={{ padding: '64px', textAlign: 'center' }}>
-                <ShieldAlert size={56} style={{ margin: '0 auto 20px', opacity: 0.3, color: 'var(--text-muted)', display: 'block' }} />
-                <h2 style={{ fontWeight: 600, marginBottom: '12px', fontSize: '22px' }}>Connect Your Wallet</h2>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: '28px', fontSize: '15px' }}>Connect MetaMask to access the Terabitt staking platform.</p>
-                <button className="btn btn-primary" style={{ padding: '12px 28px', fontSize: '15px' }} onClick={connectWallet}>
-                  <Wallet size={16} /> Connect Wallet
-                </button>
+              <div style={{ maxWidth: '800px', margin: '40px auto', padding: '0 20px' }}>
+                <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+                  <ShieldAlert size={56} style={{ margin: '0 auto 20px', color: 'var(--accent-primary)', opacity: 0.85 }} />
+                  <h2 style={{ fontWeight: 800, marginBottom: '12px', fontSize: '28px', letterSpacing: '-0.03em' }}>Connect Your Wallet</h2>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '15px', maxWidth: '480px', margin: '0 auto', lineHeight: 1.6 }}>
+                    Select your preferred Web3 provider to securely manage balances and execute precompile staking intents.
+                  </p>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
+                  {/* MetaMask Option */}
+                  <div
+                    className="glass-panel"
+                    style={{
+                      padding: '32px 24px',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      border: '1px solid var(--border-subtle)',
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      borderRadius: '20px',
+                      background: 'linear-gradient(180deg, rgba(246, 133, 27, 0.03) 0%, rgba(0,0,0,0) 100%)'
+                    }}
+                    onClick={() => connectWallet('metamask')}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(246, 133, 27, 0.4)';
+                      e.currentTarget.style.boxShadow = '0 12px 40px rgba(246, 133, 27, 0.08)';
+                      e.currentTarget.style.transform = 'translateY(-4px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.style.transform = 'none';
+                    }}
+                  >
+                    <div style={{ width: '64px', height: '64px', margin: '0 auto 24px', background: 'rgba(246, 133, 27, 0.1)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M31.2 16.2L28.8 8.4L20.4 4.8L18 7.2L15.6 4.8L7.2 8.4L4.8 16.2L9.6 18L18 20.4L26.4 18L31.2 16.2Z" fill="#F6851B" stroke="#F6851B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M18 20.4V31.2L9.6 26.4L18 20.4Z" fill="#E2761B" stroke="#E2761B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M18 20.4L26.4 26.4L18 31.2V20.4Z" fill="#E2761B" stroke="#E2761B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+                    <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)' }}>MetaMask</h3>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '13.5px', lineHeight: 1.5 }}>
+                      Connect using the standard EVM browser extension or mobile app.
+                    </p>
+                  </div>
+
+                  {/* Talisman Option */}
+                  <div
+                    className="glass-panel"
+                    style={{
+                      padding: '32px 24px',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      border: '1px solid var(--border-subtle)',
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      borderRadius: '20px',
+                      background: 'linear-gradient(180deg, rgba(16, 185, 129, 0.03) 0%, rgba(0,0,0,0) 100%)'
+                    }}
+                    onClick={() => connectWallet('talisman')}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+                      e.currentTarget.style.boxShadow = '0 12px 40px rgba(16, 185, 129, 0.08)';
+                      e.currentTarget.style.transform = 'translateY(-4px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.style.transform = 'none';
+                    }}
+                  >
+                    <div style={{ width: '64px', height: '64px', margin: '0 auto 24px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="18" cy="18" r="14" stroke="#10B981" strokeWidth="3"/>
+                        <path d="M12 18H24" stroke="#10B981" strokeWidth="3" strokeLinecap="round"/>
+                        <path d="M18 12V24" stroke="#10B981" strokeWidth="3" strokeLinecap="round"/>
+                      </svg>
+                    </div>
+                    <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)' }}>Talisman</h3>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '13.5px', lineHeight: 1.5 }}>
+                      Connect using the ultimate multi-chain portal for Ethereum and Polkadot.
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ textAlign: 'center', marginTop: '32px', color: 'var(--text-muted)', fontSize: '12px' }}>
+                  <span className="status-indicator"></span> Running on Subnet EVM Testnet (Chain ID 1010)
+                </div>
               </div>
             )}
 
@@ -916,19 +1045,19 @@ function App() {
                   {/* Segmented controls / tabs */}
                   <div style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', padding: '4px', borderRadius: '12px', border: '1px solid var(--border-subtle)', marginBottom: '24px' }}>
                     <button
-                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'stake' ? 'linear-gradient(135deg, var(--accent-primary), #4f46e5)' : 'transparent', color: stakingAction === 'stake' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'stake' ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))' : 'transparent', color: stakingAction === 'stake' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                       onClick={() => setStakingAction('stake')}
                     >
                       <Activity size={14} /> Stake TAO
                     </button>
                     <button
-                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'swap' ? 'linear-gradient(135deg, var(--accent-primary), #4f46e5)' : 'transparent', color: stakingAction === 'swap' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'swap' ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))' : 'transparent', color: stakingAction === 'swap' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                       onClick={() => setStakingAction('swap')}
                     >
                       <ArrowRightLeft size={14} /> Swap Stake
                     </button>
                     <button
-                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'unstake' ? 'linear-gradient(135deg, var(--accent-primary), #4f46e5)' : 'transparent', color: stakingAction === 'unstake' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'unstake' ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))' : 'transparent', color: stakingAction === 'unstake' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                       onClick={() => setStakingAction('unstake')}
                     >
                       <ArrowRightLeft size={14} /> Remove Stake
@@ -945,7 +1074,7 @@ function App() {
                             {[0, 1, 310].map((n) => (
                               <span
                                 key={n}
-                                style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: netuid === n ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)', border: netuid === n ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)', cursor: 'pointer', color: netuid === n ? 'white' : 'var(--text-muted)', transition: 'all 0.15s ease' }}
+                                style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: netuid === n ? 'var(--accent-glow)' : 'rgba(255,255,255,0.03)', border: netuid === n ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)', cursor: 'pointer', color: netuid === n ? 'white' : 'var(--text-muted)', transition: 'all 0.15s ease' }}
                                 onClick={() => setNetuid(n)}
                               >
                                 Netuid {n}
@@ -1033,7 +1162,7 @@ function App() {
                             {[0, 1, 310].map((n) => (
                               <span
                                 key={n}
-                                style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: unstakeNetuid === n ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)', border: unstakeNetuid === n ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)', cursor: 'pointer', color: unstakeNetuid === n ? 'white' : 'var(--text-muted)', transition: 'all 0.15s ease' }}
+                                style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: unstakeNetuid === n ? 'var(--accent-glow)' : 'rgba(255,255,255,0.03)', border: unstakeNetuid === n ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)', cursor: 'pointer', color: unstakeNetuid === n ? 'white' : 'var(--text-muted)', transition: 'all 0.15s ease' }}
                                 onClick={() => setUnstakeNetuid(n)}
                               >
                                 Netuid {n}
@@ -1059,8 +1188,8 @@ function App() {
                         <input type="number" className="input-field" placeholder={allAlphaBalances[unstakeNetuid] ? `Max: ${parseFloat(allAlphaBalances[unstakeNetuid]).toFixed(4)}` : "0.00"} value={unstakeAmount} onChange={(e) => setUnstakeAmount(e.target.value)} />
                       </div>
 
-                      <div style={{ marginBottom: '24px', padding: '14px', background: 'rgba(14,165,233,0.05)', borderRadius: '10px', border: '1px solid rgba(14,165,233,0.15)' }}>
-                        <p className="text-sm" style={{ color: 'var(--accent-secondary)', marginBottom: '4px', fontWeight: 500 }}>How it works</p>
+                      <div style={{ marginBottom: '24px', padding: '14px', background: 'var(--accent-glow-subtle)', borderRadius: '10px', border: '1px solid var(--border-highlight)' }}>
+                        <p className="text-sm" style={{ color: 'var(--accent-primary)', marginBottom: '4px', fontWeight: 500 }}>How it works</p>
                         <p className="text-sm" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Burns Alpha and atomically returns native TAO to your wallet via the staking precompile.</p>
                       </div>
 
@@ -1096,14 +1225,14 @@ function App() {
                               style={{
                                 padding: '16px',
                                 borderRadius: '12px',
-                                background: isCurrent ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                                background: isCurrent ? 'var(--accent-glow-subtle)' : 'rgba(255, 255, 255, 0.02)',
                                 border: isCurrent ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
                                 cursor: 'pointer',
                                 transition: 'all 0.2s ease',
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
-                                boxShadow: isCurrent ? '0 0 16px rgba(99, 102, 241, 0.15)' : 'none'
+                                boxShadow: isCurrent ? '0 0 16px var(--accent-glow)' : 'none'
                               }}
                               onClick={() => handlePositionClick(net)}
                               onMouseEnter={(e) => {
@@ -1223,9 +1352,130 @@ function App() {
             executeUnstake={executeUnstake}
             executeSwap={executeSwap}
             status={status}
+            openWalletSelector={() => setShowWalletModal(true)}
           />
         )}
       </main>
+
+      {showWalletModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(3, 4, 6, 0.85)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          animation: 'fadeIn 0.2s ease'
+        }} onClick={() => setShowWalletModal(false)}>
+          <div
+            className="glass-panel"
+            style={{
+              width: '100%',
+              maxWidth: '520px',
+              padding: '36px',
+              borderRadius: '24px',
+              border: '1px solid var(--border-subtle)',
+              boxShadow: '0 24px 64px rgba(0,0,0,0.8)',
+              animation: 'slideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>Connect Wallet</h3>
+              <button
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '20px', padding: '4px' }}
+                onClick={() => setShowWalletModal(false)}
+              >
+                &times;
+              </button>
+            </div>
+            
+            <p style={{ color: 'var(--text-secondary)', fontSize: '13.5px', marginBottom: '24px', lineHeight: 1.5 }}>
+              Select a wallet provider to securely authenticate and execute staking precompile intents.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* MetaMask Modal Option */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  padding: '18px 20px',
+                  borderRadius: '16px',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onClick={() => connectWallet('metamask')}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(246, 133, 27, 0.06)';
+                  e.currentTarget.style.borderColor = 'rgba(246, 133, 27, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
+                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                }}
+              >
+                <div style={{ width: '40px', height: '40px', background: 'rgba(246, 133, 27, 0.1)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="24" height="24" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M31.2 16.2L28.8 8.4L20.4 4.8L18 7.2L15.6 4.8L7.2 8.4L4.8 16.2L9.6 18L18 20.4L26.4 18L31.2 16.2Z" fill="#F6851B" stroke="#F6851B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M18 20.4V31.2L9.6 26.4L18 20.4Z" fill="#E2761B" stroke="#E2761B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M18 20.4L26.4 26.4L18 31.2V20.4Z" fill="#E2761B" stroke="#E2761B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>MetaMask</h4>
+                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>Connect with your MetaMask EVM extension</p>
+                </div>
+              </div>
+
+              {/* Talisman Modal Option */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  padding: '18px 20px',
+                  borderRadius: '16px',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onClick={() => connectWallet('talisman')}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(16, 185, 129, 0.06)';
+                  e.currentTarget.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
+                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                }}
+              >
+                <div style={{ width: '40px', height: '40px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="24" height="24" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="18" cy="18" r="14" stroke="#10B981" strokeWidth="3"/>
+                    <path d="M12 18H24" stroke="#10B981" strokeWidth="3" strokeLinecap="round"/>
+                    <path d="M18 12V24" stroke="#10B981" strokeWidth="3" strokeLinecap="round"/>
+                  </svg>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Talisman</h4>
+                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>Connect with your Talisman EVM & Substrate portal</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
