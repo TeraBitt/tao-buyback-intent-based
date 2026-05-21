@@ -1,19 +1,54 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type CSSProperties } from 'react';
 import { ethers } from 'ethers';
 import { blake2b } from 'blakejs';
-import { Wallet, ArrowRightLeft, Activity, AlertCircle, History, ShieldAlert, LogOut } from 'lucide-react';
+import { Wallet, ArrowRightLeft, Activity, AlertCircle, History, LogOut } from 'lucide-react';
 import { CONFIG } from './config';
 import abiData from './abi.json';
 import './index.css';
 import ChatPortal from './components/ChatPortal';
 
 declare global {
-  interface Window {
+interface Window {
     ethereum: any;
   }
 }
 
 const CONTRACT_ABI = abiData;
+type WalletType = 'metamask' | 'talisman';
+
+interface WalletOption {
+  id: WalletType;
+  label: string;
+  subtitle: string;
+  description: string;
+  iconSrc: string;
+  wordmarkSrc: string;
+  accent: string;
+  accentRgb: string;
+}
+
+const WALLET_OPTIONS: WalletOption[] = [
+  {
+    id: 'metamask',
+    label: 'MetaMask',
+    subtitle: 'EVM native',
+    description: 'A clean default for browser-based TAO staking on the Subnet EVM testnet.',
+    iconSrc: '/wallets/metamask-icon.svg',
+    wordmarkSrc: '/wallets/metamask-wordmark.svg',
+    accent: '#F6851B',
+    accentRgb: '246, 133, 27',
+  },
+  {
+    id: 'talisman',
+    label: 'Talisman',
+    subtitle: 'Bittensor friendly',
+    description: 'Best when you want one wallet flow that already feels native to the broader ecosystem.',
+    iconSrc: '/wallets/talisman-icon.svg',
+    wordmarkSrc: '/wallets/talisman-wordmark.svg',
+    accent: '#FF4D6D',
+    accentRgb: '255, 77, 109',
+  },
+];
 
 // Single persistent JsonRpcProvider for all read-only calls
 const directProvider = new ethers.JsonRpcProvider(CONFIG.NETWORK.rpcUrls[0], undefined, {
@@ -49,8 +84,9 @@ function App() {
   const [allAlphaBalances, setAllAlphaBalances] = useState<{ [id: number]: string }>({});
   const [stakedHotkeys, setStakedHotkeys] = useState<{ [netuid: number]: string }>({});
   const [stakeHistory, setStakeHistory] = useState<StakeEvent[]>([]);
-  const [walletType, setWalletType] = useState<'metamask' | 'talisman' | null>(null);
+  const [walletType, setWalletType] = useState<WalletType | null>(null);
   const [showWalletModal, setShowWalletModal] = useState(false);
+  const [isWalletHydrating, setIsWalletHydrating] = useState(false);
 
   const decodeDelegations = (scaleBytes: any): { netuid: number; stake: number; hotkey: string }[] => {
     if (!scaleBytes) return [];
@@ -390,6 +426,7 @@ function App() {
   }, [netuid, account, provider]);
 
   const clearWalletState = () => {
+    setIsWalletHydrating(false);
     setAccount('');
     setSigner(null);
     setProvider(null);
@@ -425,8 +462,8 @@ function App() {
     }
   };
 
-  const connectWallet = async (wallet?: 'metamask' | 'talisman') => {
-    const selectedWallet = wallet || (localStorage.getItem('connected_wallet') as 'metamask' | 'talisman') || 'metamask';
+  const connectWallet = async (wallet?: WalletType) => {
+    const selectedWallet = wallet || (localStorage.getItem('connected_wallet') as WalletType) || 'metamask';
     let ethereumProvider: any = null;
     if (selectedWallet === 'talisman') {
       ethereumProvider = (window as any).talismanEth || (window as any).ethereum;
@@ -435,10 +472,12 @@ function App() {
     }
 
     if (!ethereumProvider) {
+      setIsWalletHydrating(false);
       setStatus({ type: 'error', msg: `${selectedWallet === 'talisman' ? 'Talisman' : 'MetaMask'} not installed` });
       return;
     }
     try {
+      setIsWalletHydrating(true);
       setStatus({ type: 'loading', msg: `Connecting to ${selectedWallet === 'talisman' ? 'Talisman' : 'MetaMask'}...` });
       const prov = new ethers.BrowserProvider(ethereumProvider);
 
@@ -473,15 +512,17 @@ function App() {
       setShowWalletModal(false);
       await fetchStats(prov, address);
 
+      setIsWalletHydrating(false);
       setStatus({ type: 'idle', msg: '' });
     } catch (err: any) {
       console.error(err);
+      setIsWalletHydrating(false);
       setStatus({ type: 'error', msg: err.message || 'Failed to connect' });
     }
   };
 
   useEffect(() => {
-    const savedWallet = localStorage.getItem('connected_wallet') as 'metamask' | 'talisman' | null;
+    const savedWallet = localStorage.getItem('connected_wallet') as WalletType | null;
     if (savedWallet) {
       connectWallet(savedWallet);
     }
@@ -841,6 +882,188 @@ function App() {
     }
   };
 
+  const formatShortValue = (value: string, start = 8, end = 6) => {
+    if (!value) return '';
+    return `${value.slice(0, start)}...${value.slice(-end)}`;
+  };
+
+  const getSubnetLabel = (net: number) => {
+    if (net === 310) return 'Alpha Subnet';
+    if (net === 0) return 'Root Network';
+    if (net === 1) return 'Subnet 1';
+    return `Subnet ${net}`;
+  };
+
+  const getWalletOption = (wallet: WalletType | null) =>
+    wallet ? WALLET_OPTIONS.find((option) => option.id === wallet) ?? null : null;
+
+  const renderWalletCardStyle = (option: WalletOption): CSSProperties => ({
+    '--wallet-accent': option.accent,
+    '--wallet-accent-rgb': option.accentRgb,
+  } as CSSProperties);
+
+  const activePositions = Object.entries(allAlphaBalances).filter(([, bal]) => parseFloat(bal) > 0);
+  const selectedWalletOption = getWalletOption(walletType);
+  const showStatusBanner = Boolean(status.msg) && !(status.type === 'loading' && (!account || isWalletHydrating));
+  const connectingWallet =
+    !account && status.type === 'loading'
+      ? WALLET_OPTIONS.find((option) => status.msg.toLowerCase().includes(option.label.toLowerCase()))?.id ?? null
+      : null;
+  const chainId = Number.parseInt(CONFIG.NETWORK.chainId, 16);
+
+  const renderWalletConnectCard = (option: WalletOption) => {
+    const isConnecting = connectingWallet === option.id;
+
+    return (
+      <button
+        key={option.id}
+        type="button"
+        className={`wallet-option-card ${isConnecting ? 'is-loading' : ''}`}
+        style={renderWalletCardStyle(option)}
+        onClick={() => connectWallet(option.id)}
+        disabled={Boolean(connectingWallet)}
+      >
+        <div className="wallet-option-card__glow" />
+        <div className="wallet-option-card__shine" />
+        <div className="wallet-option-card__topline">
+          <span className="wallet-option-card__badge">{option.subtitle}</span>
+          <div className="wallet-option-card__icon-shell">
+            <img src={option.iconSrc} alt="" className="wallet-option-card__icon" />
+          </div>
+        </div>
+        <img src={option.wordmarkSrc} alt={`${option.label} logo`} className="wallet-option-card__wordmark" />
+        <p className="wallet-option-card__description">{option.description}</p>
+        <div className="wallet-option-card__footer">
+          <span>{isConnecting ? `Authorizing ${option.label}` : `Use ${option.label}`}</span>
+          <span className="wallet-option-card__pulse" />
+        </div>
+      </button>
+    );
+  };
+
+  const renderWalletModalOption = (option: WalletOption) => {
+    const isConnecting = connectingWallet === option.id;
+
+    return (
+      <button
+        key={option.id}
+        type="button"
+        className={`wallet-modal-option ${isConnecting ? 'is-loading' : ''}`}
+        style={renderWalletCardStyle(option)}
+        onClick={() => connectWallet(option.id)}
+        disabled={Boolean(connectingWallet)}
+      >
+        <div className="wallet-modal-option__icon-shell">
+          <img src={option.iconSrc} alt="" className="wallet-modal-option__icon" />
+        </div>
+        <div className="wallet-modal-option__copy">
+          <img src={option.wordmarkSrc} alt={`${option.label} logo`} className="wallet-modal-option__wordmark" />
+          <p>{option.description}</p>
+        </div>
+        <span className="wallet-modal-option__action">{isConnecting ? 'Connecting' : 'Select'}</span>
+      </button>
+    );
+  };
+
+  const renderWalletHydrationSkeleton = () => (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '32px' }} className="stats-grid-3">
+        {[
+          { label: 'TAO Balance', unit: 'TAO' },
+          { label: `Your Alpha (Netuid ${netuid})`, unit: 'ALPHA' },
+          { label: `Global Hotkey (Netuid ${CONFIG.DEFAULT_NETUID})`, unit: 'ALPHA' },
+        ].map((item) => (
+          <div key={item.label} className="glass-panel skeleton-stat-card">
+            <p className="skeleton-static-eyebrow">{item.label}</p>
+            <div className="skeleton-stat-value-row">
+              <div className="skeleton-block skeleton-value" />
+              <span className="skeleton-static-unit">{item.unit}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '24px', alignItems: 'start' }} className="grid-cols-2">
+        <div className="glass-panel skeleton-engine-card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+            <ArrowRightLeft size={20} color="var(--accent-primary)" />
+            <h3 style={{ margin: 0, fontWeight: 700, fontSize: '18px', letterSpacing: '-0.02em' }}>Staking Engine</h3>
+          </div>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
+            Configure and execute Bittensor precompile staking operations atomically.
+          </p>
+
+          <div className="skeleton-tabs">
+            <div className="skeleton-tab-shell is-active"><span>Stake TAO</span></div>
+            <div className="skeleton-tab-shell"><span>Swap Stake</span></div>
+            <div className="skeleton-tab-shell"><span>Remove Stake</span></div>
+          </div>
+
+          <div className="skeleton-form-stack">
+            <div className="skeleton-form-group">
+              <div className="skeleton-form-label-row">
+                <label className="text-sm skeleton-static-label">Target Subnet (Netuid)</label>
+                <div className="skeleton-pill-group">
+                  <span className="skeleton-static-pill">Netuid 0</span>
+                  <span className="skeleton-static-pill">Netuid 1</span>
+                  <span className="skeleton-static-pill active">Netuid 310</span>
+                </div>
+              </div>
+              <div className="skeleton-input-shell">
+                <div className="skeleton-block skeleton-input-value short" />
+              </div>
+            </div>
+
+            <div className="skeleton-form-group">
+              <div className="skeleton-form-label-row">
+                <label className="text-sm skeleton-static-label">Amount <span style={{ color: 'var(--accent-secondary)' }}>TAO</span></label>
+                <div className="skeleton-block skeleton-inline-note" />
+              </div>
+              <div className="skeleton-input-shell">
+                <div className="skeleton-block skeleton-input-value" />
+              </div>
+            </div>
+
+            <button className="btn btn-secondary skeleton-action-button" disabled>
+              <Activity size={16} /> Stake TAO
+            </button>
+          </div>
+        </div>
+
+        <div className="glass-panel skeleton-positions-card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+            <Activity size={20} color="var(--accent-secondary)" />
+            <h3 style={{ margin: 0, fontWeight: 700, fontSize: '18px', letterSpacing: '-0.02em' }}>Staking Positions</h3>
+          </div>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
+            Your current on-chain stakes and validator routes. Click any position to load it into the form.
+          </p>
+
+          <div className="skeleton-position-stack">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index} className="skeleton-position-item">
+                <div>
+                  <div className="skeleton-position-topline">
+                    <div className="skeleton-block skeleton-position-title" />
+                    <div className="skeleton-block skeleton-position-pill" />
+                  </div>
+                  <div className="position-validator-line">
+                    <span className="position-validator-line__label">Validator</span>
+                    <div className="skeleton-block skeleton-position-meta" />
+                  </div>
+                </div>
+                <div className="skeleton-position-amount">
+                  <div className="skeleton-block skeleton-position-value" />
+                  <span className="skeleton-static-unit small">ALPHA</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <>
       <header className="app-header">
@@ -859,23 +1082,23 @@ function App() {
         {/* Wallet */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {account ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-                <span style={{
-                  fontSize: '9px',
-                  fontWeight: 700,
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  background: walletType === 'talisman' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(246, 133, 27, 0.15)',
-                  color: walletType === 'talisman' ? '#10B981' : '#F6851B',
-                  border: walletType === 'talisman' ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(246, 133, 27, 0.3)'
-                }}>
-                  {walletType || 'wallet'}
-                </span>
-                <span className="status-indicator"></span>
-                <span className="mono text-sm">{account.substring(0, 6)}...{account.substring(38)}</span>
+            <div className="wallet-toolbar">
+              <div className="wallet-connected-chip">
+                {selectedWalletOption && (
+                  <div
+                    className="wallet-connected-chip__icon-shell"
+                    style={renderWalletCardStyle(selectedWalletOption)}
+                  >
+                    <img src={selectedWalletOption.iconSrc} alt="" className="wallet-connected-chip__icon" />
+                  </div>
+                )}
+                <div className="wallet-connected-chip__copy">
+                  <span className="wallet-connected-chip__label">{selectedWalletOption?.label || 'Wallet'}</span>
+                  <div className="wallet-connected-chip__address">
+                    <span className="status-indicator"></span>
+                    <span className="mono text-sm">{formatShortValue(account, 6, 4)}</span>
+                  </div>
+                </div>
               </div>
               <button
                 className="btn btn-secondary"
@@ -903,7 +1126,7 @@ function App() {
           </div>
         )}
 
-        {status.msg && (
+        {showStatusBanner && (
           <div className="glass-panel" style={{
             marginBottom: '24px',
             padding: '16px',
@@ -920,7 +1143,11 @@ function App() {
         {activeTab === 'staking' ? (
           <>
             {account ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '32px' }}>
+              isWalletHydrating ? (
+                renderWalletHydrationSkeleton()
+              ) : (
+              <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '32px' }} className="stats-grid-3">
                 <div className="glass-panel" style={{ padding: '20px 24px' }}>
                   <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>TAO Balance</p>
                   <p className="mono" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{parseFloat(balance).toFixed(4)} <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>TAO</span></p>
@@ -934,103 +1161,35 @@ function App() {
                   <p className="mono" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{parseFloat(totalAlphaStaked).toFixed(4)} <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>ALPHA</span></p>
                 </div>
               </div>
+              </>
+              )
             ) : (
-              <div style={{ maxWidth: '800px', margin: '40px auto', padding: '0 20px' }}>
-                <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-                  <ShieldAlert size={56} style={{ margin: '0 auto 20px', color: 'var(--accent-primary)', opacity: 0.85 }} />
-                  <h2 style={{ fontWeight: 800, marginBottom: '12px', fontSize: '28px', letterSpacing: '-0.03em' }}>Connect Your Wallet</h2>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '15px', maxWidth: '480px', margin: '0 auto', lineHeight: 1.6 }}>
-                    Select your preferred Web3 provider to securely manage balances and execute precompile staking intents.
-                  </p>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
-                  {/* MetaMask Option */}
-                  <div
-                    className="glass-panel"
-                    style={{
-                      padding: '32px 24px',
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      border: '1px solid var(--border-subtle)',
-                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                      position: 'relative',
-                      overflow: 'hidden',
-                      borderRadius: '20px',
-                      background: 'linear-gradient(180deg, rgba(246, 133, 27, 0.03) 0%, rgba(0,0,0,0) 100%)'
-                    }}
-                    onClick={() => connectWallet('metamask')}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = 'rgba(246, 133, 27, 0.4)';
-                      e.currentTarget.style.boxShadow = '0 12px 40px rgba(246, 133, 27, 0.08)';
-                      e.currentTarget.style.transform = 'translateY(-4px)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--border-subtle)';
-                      e.currentTarget.style.boxShadow = 'none';
-                      e.currentTarget.style.transform = 'none';
-                    }}
-                  >
-                    <div style={{ width: '64px', height: '64px', margin: '0 auto 24px', background: 'rgba(246, 133, 27, 0.1)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M31.2 16.2L28.8 8.4L20.4 4.8L18 7.2L15.6 4.8L7.2 8.4L4.8 16.2L9.6 18L18 20.4L26.4 18L31.2 16.2Z" fill="#F6851B" stroke="#F6851B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M18 20.4V31.2L9.6 26.4L18 20.4Z" fill="#E2761B" stroke="#E2761B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M18 20.4L26.4 26.4L18 31.2V20.4Z" fill="#E2761B" stroke="#E2761B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    </div>
-                    <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)' }}>MetaMask</h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '13.5px', lineHeight: 1.5 }}>
-                      Connect using the standard EVM browser extension or mobile app.
+              <div className="wallet-connect-shell">
+                <div className="wallet-connect-hero glass-panel">
+                  <div className="wallet-connect-hero__orbs">
+                    <span className="wallet-connect-hero__orb wallet-connect-hero__orb--primary" />
+                    <span className="wallet-connect-hero__orb wallet-connect-hero__orb--secondary" />
+                  </div>
+                  <div className="wallet-connect-hero__copy">
+                    <span className="wallet-connect-hero__eyebrow">Wallet Gateway</span>
+                    <h2>Choose a wallet, then stake into Alpha with a cleaner flow.</h2>
+                    <p>
+                      Connect your preferred provider to review balances, launch staking intents, and surface the validator
+                      routing for each Alpha position right in the dashboard.
                     </p>
                   </div>
-
-                  {/* Talisman Option */}
-                  <div
-                    className="glass-panel"
-                    style={{
-                      padding: '32px 24px',
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      border: '1px solid var(--border-subtle)',
-                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                      position: 'relative',
-                      overflow: 'hidden',
-                      borderRadius: '20px',
-                      background: 'linear-gradient(180deg, rgba(16, 185, 129, 0.03) 0%, rgba(0,0,0,0) 100%)'
-                    }}
-                    onClick={() => connectWallet('talisman')}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-                      e.currentTarget.style.boxShadow = '0 12px 40px rgba(16, 185, 129, 0.08)';
-                      e.currentTarget.style.transform = 'translateY(-4px)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--border-subtle)';
-                      e.currentTarget.style.boxShadow = 'none';
-                      e.currentTarget.style.transform = 'none';
-                    }}
-                  >
-                    <div style={{ width: '64px', height: '64px', margin: '0 auto 24px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="18" cy="18" r="14" stroke="#10B981" strokeWidth="3"/>
-                        <path d="M12 18H24" stroke="#10B981" strokeWidth="3" strokeLinecap="round"/>
-                        <path d="M18 12V24" stroke="#10B981" strokeWidth="3" strokeLinecap="round"/>
-                      </svg>
-                    </div>
-                    <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)' }}>Talisman</h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '13.5px', lineHeight: 1.5 }}>
-                      Connect using the ultimate multi-chain portal for Ethereum and Polkadot.
-                    </p>
+                  <div className="wallet-connect-grid">
+                    {WALLET_OPTIONS.map(renderWalletConnectCard)}
                   </div>
                 </div>
-
-                <div style={{ textAlign: 'center', marginTop: '32px', color: 'var(--text-muted)', fontSize: '12px' }}>
-                  <span className="status-indicator"></span> Running on Subnet EVM Testnet (Chain ID 1010)
+                <div className="wallet-connect-footnote">
+                  <span className="status-indicator"></span>
+                  <span>{CONFIG.NETWORK.chainName} • Chain ID {chainId}</span>
                 </div>
               </div>
             )}
 
-            {account && (
+            {account && !isWalletHydrating && (
               <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '24px', alignItems: 'start' }} className="grid-cols-2">
                 {/* Unified Staking Engine Widget */}
                 <div className="glass-panel" style={{ padding: '28px' }}>
@@ -1207,15 +1366,15 @@ function App() {
                     <h3 style={{ margin: 0, fontWeight: 700, fontSize: '18px', letterSpacing: '-0.02em' }}>Staking Positions</h3>
                   </div>
                   <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
-                    Your current on-chain stakes. Click on any position to load it into the form.
+                    Your current on-chain stakes and validator routes. Click any position to load it into the form.
                   </p>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
-                    {Object.entries(allAlphaBalances).filter(([_, bal]) => parseFloat(bal) > 0).length > 0 ? (
-                      Object.entries(allAlphaBalances)
-                        .filter(([_, bal]) => parseFloat(bal) > 0)
+                    {activePositions.length > 0 ? (
+                      activePositions
                         .map(([id, bal]) => {
                           const net = Number(id);
+                          const validatorHotkey = stakedHotkeys[net] || '';
                           const isCurrent = (stakingAction === 'stake' && netuid === net) ||
                             (stakingAction === 'unstake' && unstakeNetuid === net) ||
                             (stakingAction === 'swap' && swapSourceNetuid === net);
@@ -1251,15 +1410,18 @@ function App() {
                               <div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                                   <span style={{ fontSize: '14px', fontWeight: 600, color: 'white' }}>
-                                    {net === 310 ? 'Alpha Subnet' : net === 0 ? 'Root Network' : `Subnet ${net}`}
+                                    {getSubnetLabel(net)}
                                   </span>
                                   <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)', fontFamily: 'var(--font-mono)' }}>
                                     Netuid {net}
                                   </span>
                                 </div>
-                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                                  Click to load subnet
-                                </span>
+                                <div className="position-validator-line" title={validatorHotkey || 'Validator hotkey is still syncing'}>
+                                  <span className="position-validator-line__label">Validator</span>
+                                  <span className="mono position-validator-line__value">
+                                    {validatorHotkey ? formatShortValue(validatorHotkey, 8, 6) : 'Syncing…'}
+                                  </span>
+                                </div>
                               </div>
                               <div style={{ textAlign: 'right' }}>
                                 <span className="mono" style={{ fontSize: '16px', fontWeight: 600, color: 'var(--accent-secondary)' }}>
@@ -1358,38 +1520,15 @@ function App() {
       </main>
 
       {showWalletModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(3, 4, 6, 0.85)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          animation: 'fadeIn 0.2s ease'
-        }} onClick={() => setShowWalletModal(false)}>
+        <div className="wallet-modal-backdrop" onClick={() => setShowWalletModal(false)}>
           <div
-            className="glass-panel"
-            style={{
-              width: '100%',
-              maxWidth: '520px',
-              padding: '36px',
-              borderRadius: '24px',
-              border: '1px solid var(--border-subtle)',
-              boxShadow: '0 24px 64px rgba(0,0,0,0.8)',
-              animation: 'slideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
-            }}
+            className="glass-panel wallet-modal-card"
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px' }}>
+            <div className="wallet-modal-card__header">
               <h3 style={{ fontSize: '20px', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>Connect Wallet</h3>
               <button
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '20px', padding: '4px' }}
+                className="wallet-modal-card__close"
                 onClick={() => setShowWalletModal(false)}
               >
                 &times;
@@ -1400,78 +1539,8 @@ function App() {
               Select a wallet provider to securely authenticate and execute staking precompile intents.
             </p>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* MetaMask Modal Option */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '16px',
-                  padding: '18px 20px',
-                  borderRadius: '16px',
-                  border: '1px solid var(--border-subtle)',
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease'
-                }}
-                onClick={() => connectWallet('metamask')}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(246, 133, 27, 0.06)';
-                  e.currentTarget.style.borderColor = 'rgba(246, 133, 27, 0.4)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
-                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
-                }}
-              >
-                <div style={{ width: '40px', height: '40px', background: 'rgba(246, 133, 27, 0.1)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="24" height="24" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M31.2 16.2L28.8 8.4L20.4 4.8L18 7.2L15.6 4.8L7.2 8.4L4.8 16.2L9.6 18L18 20.4L26.4 18L31.2 16.2Z" fill="#F6851B" stroke="#F6851B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M18 20.4V31.2L9.6 26.4L18 20.4Z" fill="#E2761B" stroke="#E2761B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M18 20.4L26.4 26.4L18 31.2V20.4Z" fill="#E2761B" stroke="#E2761B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>MetaMask</h4>
-                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>Connect with your MetaMask EVM extension</p>
-                </div>
-              </div>
-
-              {/* Talisman Modal Option */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '16px',
-                  padding: '18px 20px',
-                  borderRadius: '16px',
-                  border: '1px solid var(--border-subtle)',
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease'
-                }}
-                onClick={() => connectWallet('talisman')}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(16, 185, 129, 0.06)';
-                  e.currentTarget.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
-                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
-                }}
-              >
-                <div style={{ width: '40px', height: '40px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="24" height="24" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="18" cy="18" r="14" stroke="#10B981" strokeWidth="3"/>
-                    <path d="M12 18H24" stroke="#10B981" strokeWidth="3" strokeLinecap="round"/>
-                    <path d="M18 12V24" stroke="#10B981" strokeWidth="3" strokeLinecap="round"/>
-                  </svg>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Talisman</h4>
-                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>Connect with your Talisman EVM & Substrate portal</p>
-                </div>
-              </div>
+            <div className="wallet-modal-card__options">
+              {WALLET_OPTIONS.map(renderWalletModalOption)}
             </div>
           </div>
         </div>
