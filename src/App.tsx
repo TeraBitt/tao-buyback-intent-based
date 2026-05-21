@@ -57,6 +57,7 @@ function App() {
   const [swapSourceNetuid, setSwapSourceNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
   const [swapTargetNetuid, setSwapTargetNetuid] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'staking' | 'chat'>('staking');
+  const [stakingAction, setStakingAction] = useState<'stake' | 'swap' | 'unstake'>('stake');
 
   const [status, setStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error', msg: string }>({ type: 'idle', msg: '' });
 
@@ -193,7 +194,7 @@ function App() {
       // Also check a few common netuids for the "all balances" map (parallelized, deduplicated)
       const checkNetuids = Array.from(new Set([0, 1, netuid, 310]));
       const balances: { [id: number]: string } = {};
-      
+
       await Promise.all(checkNetuids.map(async (checkNetuid) => {
         try {
           const hk = getHotkeyForNetuid(checkNetuid);
@@ -333,7 +334,7 @@ function App() {
     if (!signer || !account) return false;
     try {
       const contract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-      
+
       const domain = {
         name: "SynchronousIntent",
         version: "1",
@@ -382,14 +383,14 @@ function App() {
       };
 
       setStatus({ type: 'loading', msg: 'Broadcasting fillIntent transaction...' });
-      const tx = await contract.fillIntent(intentWithSig, "0x", { 
+      const tx = await contract.fillIntent(intentWithSig, "0x", {
         value: valueToSend,
         gasLimit: 800000n // Bypasses the Substrate EVM node gas estimation simulation bugs
       });
-      
+
       setStatus({ type: 'loading', msg: 'Waiting for blockchain confirmation...' });
       await tx.wait();
-      
+
       return true;
     } catch (err: any) {
       console.error(err);
@@ -402,7 +403,7 @@ function App() {
     if (!signer || !amount) return false;
     try {
       setStatus({ type: 'loading', msg: `Preparing Stake Intent of ${amount} TAO...` });
-      
+
       const amountInWei = ethers.parseEther(amount);
       const amountInRao = amountInWei / 1000000000n; // 1e9
 
@@ -612,6 +613,16 @@ function App() {
     return "0x1e738b33dfbd68eaba7db3f03fe942cfa4e32b728e52c26743b16dbca15af464";
   };
 
+  const handlePositionClick = (net: number) => {
+    setNetuid(net);
+    setUnstakeNetuid(net);
+    setSwapSourceNetuid(net);
+    // Automatically switch to unstake tab if currently on stake tab so they can see unstake options
+    if (stakingAction === 'stake') {
+      setStakingAction('unstake');
+    }
+  };
+
   const handleBuyAlpha = async () => {
     const hotkey = getHotkeyForNetuid(netuid);
     if (await executeStake(stakeAmount, netuid, hotkey)) {
@@ -643,9 +654,7 @@ function App() {
       <header className="app-header">
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'linear-gradient(135deg, var(--accent-primary), #4f46e5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Activity size={18} color="white" />
-          </div>
+          <img src="/logo-white.png" alt="Terabitt Logo" style={{ height: '26px', width: 'auto', objectFit: 'contain' }} />
           <span style={{ fontWeight: 700, fontSize: '18px', letterSpacing: '-0.03em' }}>terabitt</span>
         </div>
 
@@ -663,9 +672,9 @@ function App() {
                 <span className="status-indicator"></span>
                 <span className="mono text-sm">{account.substring(0, 6)}...{account.substring(38)}</span>
               </div>
-              <button 
-                className="btn btn-secondary" 
-                style={{ padding: '8px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} 
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '8px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 onClick={disconnectWallet}
                 title="Disconnect Wallet"
               >
@@ -731,170 +740,319 @@ function App() {
               </div>
             )}
 
-        {account && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px' }}>
-            {/* Add Stake Panel */}
-            <div className="glass-panel" style={{ padding: '28px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                <ArrowRightLeft size={18} color="var(--accent-primary)" />
-                <h3 style={{ margin: 0, fontWeight: 600 }}>Add Stake</h3>
-              </div>
-              <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Deposit TAO to receive Alpha on a subnet.</p>
+            {account && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '24px', alignItems: 'start' }} className="grid-cols-2">
+                {/* Unified Staking Engine Widget */}
+                <div className="glass-panel" style={{ padding: '28px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                    <ArrowRightLeft size={20} color="var(--accent-primary)" />
+                    <h3 style={{ margin: 0, fontWeight: 700, fontSize: '18px', letterSpacing: '-0.02em' }}>Staking Engine</h3>
+                  </div>
+                  <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
+                    Configure and execute Bittensor precompile staking operations atomically.
+                  </p>
 
-              <div style={{ marginBottom: '16px' }}>
-                <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Subnet (Netuid)</label>
-                <input type="number" className="input-field" value={netuid} onChange={(e) => setNetuid(Number(e.target.value))} />
-              </div>
-              <div style={{ marginBottom: '24px' }}>
-                <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>TAO</span></label>
-                <input type="number" className="input-field" placeholder="0.00" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} />
-              </div>
-              <button className="btn btn-primary" style={{ width: '100%', padding: '13px' }} disabled={!account || !stakeAmount || status.type === 'loading'} onClick={handleBuyAlpha}>
-                <ArrowRightLeft size={16} /> Stake TAO
-              </button>
-            </div>
-
-            {/* Swap Stake Panel */}
-            <div className="glass-panel" style={{ padding: '28px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                <ArrowRightLeft size={18} color="var(--accent-primary)" />
-                <h3 style={{ margin: 0, fontWeight: 600 }}>Swap Stake</h3>
-              </div>
-              <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Atomically move your stake from one subnet to another.</p>
-
-              <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-                <div style={{ flex: 1 }}>
-                  <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Source Netuid</label>
-                  <input type="number" className="input-field" value={swapSourceNetuid} onChange={(e) => setSwapSourceNetuid(Number(e.target.value))} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Target Netuid</label>
-                  <input type="number" className="input-field" value={swapTargetNetuid} onChange={(e) => setSwapTargetNetuid(Number(e.target.value))} />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '24px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <label className="text-sm" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
-                    Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span>
-                  </label>
-                  {account && (
-                    <span 
-                      className="text-xs text-accent" 
-                      style={{ cursor: 'pointer', textDecoration: 'underline' }} 
-                      onClick={() => setSwapAmount(allAlphaBalances[swapSourceNetuid] || '0')}
+                  {/* Segmented controls / tabs */}
+                  <div style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', padding: '4px', borderRadius: '12px', border: '1px solid var(--border-subtle)', marginBottom: '24px' }}>
+                    <button
+                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'stake' ? 'linear-gradient(135deg, var(--accent-primary), #4f46e5)' : 'transparent', color: stakingAction === 'stake' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      onClick={() => setStakingAction('stake')}
                     >
-                      Max: {allAlphaBalances[swapSourceNetuid] ? parseFloat(allAlphaBalances[swapSourceNetuid]).toFixed(4) : '0.0000'}
-                    </span>
+                      <Activity size={14} /> Stake TAO
+                    </button>
+                    <button
+                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'swap' ? 'linear-gradient(135deg, var(--accent-primary), #4f46e5)' : 'transparent', color: stakingAction === 'swap' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      onClick={() => setStakingAction('swap')}
+                    >
+                      <ArrowRightLeft size={14} /> Swap Stake
+                    </button>
+                    <button
+                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'unstake' ? 'linear-gradient(135deg, var(--accent-primary), #4f46e5)' : 'transparent', color: stakingAction === 'unstake' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      onClick={() => setStakingAction('unstake')}
+                    >
+                      <ArrowRightLeft size={14} /> Remove Stake
+                    </button>
+                  </div>
+
+                  {/* Dynamic Action Forms */}
+                  {stakingAction === 'stake' && (
+                    <div>
+                      <div style={{ marginBottom: '16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <label className="text-sm" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Target Subnet (Netuid)</label>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            {[0, 1, 310].map((n) => (
+                              <span
+                                key={n}
+                                style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: netuid === n ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)', border: netuid === n ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)', cursor: 'pointer', color: netuid === n ? 'white' : 'var(--text-muted)', transition: 'all 0.15s ease' }}
+                                onClick={() => setNetuid(n)}
+                              >
+                                Netuid {n}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <input type="number" className="input-field" value={netuid} onChange={(e) => setNetuid(Number(e.target.value))} />
+                      </div>
+                      <div style={{ marginBottom: '24px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <label className="text-sm" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>TAO</span></label>
+                          {account && (
+                            <span
+                              className="text-xs text-accent"
+                              style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--accent-secondary)', fontWeight: 500 }}
+                              onClick={() => setStakeAmount(balance)}
+                            >
+                              Available: {parseFloat(balance).toFixed(4)} TAO (Max)
+                            </span>
+                          )}
+                        </div>
+                        <input type="number" className="input-field" placeholder="0.00" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} />
+                      </div>
+                      <button className="btn btn-primary" style={{ width: '100%', padding: '13px' }} disabled={!account || !stakeAmount || status.type === 'loading'} onClick={handleBuyAlpha}>
+                        <Activity size={16} /> Stake TAO
+                      </button>
+                    </div>
+                  )}
+
+                  {stakingAction === 'swap' && (
+                    <div>
+                      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+                        <div style={{ flex: 1 }}>
+                          <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontWeight: 500 }}>Source Netuid</label>
+                          <input type="number" className="input-field" value={swapSourceNetuid} onChange={(e) => setSwapSourceNetuid(Number(e.target.value))} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontWeight: 500 }}>Target Netuid</label>
+                          <input type="number" className="input-field" value={swapTargetNetuid} onChange={(e) => setSwapTargetNetuid(Number(e.target.value))} />
+                        </div>
+                      </div>
+
+                      <div style={{ marginBottom: '24px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <label className="text-sm" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
+                            Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span>
+                          </label>
+                          {account && (
+                            <span
+                              className="text-xs text-accent"
+                              style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--accent-secondary)', fontWeight: 500 }}
+                              onClick={() => setSwapAmount(allAlphaBalances[swapSourceNetuid] || '0')}
+                            >
+                              Max: {allAlphaBalances[swapSourceNetuid] ? parseFloat(allAlphaBalances[swapSourceNetuid]).toFixed(4) : '0.0000'}
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="number"
+                          className="input-field"
+                          placeholder={allAlphaBalances[swapSourceNetuid] && parseFloat(allAlphaBalances[swapSourceNetuid]) > 0 ? `Max: ${parseFloat(allAlphaBalances[swapSourceNetuid]).toFixed(4)}` : "0.00"}
+                          value={swapAmount}
+                          onChange={(e) => setSwapAmount(e.target.value)}
+                        />
+                      </div>
+
+                      <button
+                        className="btn btn-primary"
+                        style={{ width: '100%', padding: '13px' }}
+                        disabled={!account || status.type === 'loading' || (swapAmount === '' && (!allAlphaBalances[swapSourceNetuid] || parseFloat(allAlphaBalances[swapSourceNetuid]) === 0))}
+                        onClick={handleSwap}
+                      >
+                        <ArrowRightLeft size={16} /> {swapAmount ? 'Swap Stake' : 'Swap All Alpha'}
+                      </button>
+                    </div>
+                  )}
+
+                  {stakingAction === 'unstake' && (
+                    <div>
+                      <div style={{ marginBottom: '16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <label className="text-sm" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Subnet (Netuid)</label>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            {[0, 1, 310].map((n) => (
+                              <span
+                                key={n}
+                                style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: unstakeNetuid === n ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)', border: unstakeNetuid === n ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)', cursor: 'pointer', color: unstakeNetuid === n ? 'white' : 'var(--text-muted)', transition: 'all 0.15s ease' }}
+                                onClick={() => setUnstakeNetuid(n)}
+                              >
+                                Netuid {n}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <input type="number" className="input-field" value={unstakeNetuid} onChange={(e) => setUnstakeNetuid(Number(e.target.value))} />
+                      </div>
+                      <div style={{ marginBottom: '24px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <label className="text-sm" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span></label>
+                          {account && (
+                            <span
+                              className="text-xs text-accent"
+                              style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--accent-secondary)', fontWeight: 500 }}
+                              onClick={() => setUnstakeAmount(allAlphaBalances[unstakeNetuid] || '0')}
+                            >
+                              Max: {allAlphaBalances[unstakeNetuid] ? parseFloat(allAlphaBalances[unstakeNetuid]).toFixed(4) : '0.0000'}
+                            </span>
+                          )}
+                        </div>
+                        <input type="number" className="input-field" placeholder={allAlphaBalances[unstakeNetuid] ? `Max: ${parseFloat(allAlphaBalances[unstakeNetuid]).toFixed(4)}` : "0.00"} value={unstakeAmount} onChange={(e) => setUnstakeAmount(e.target.value)} />
+                      </div>
+
+                      <div style={{ marginBottom: '24px', padding: '14px', background: 'rgba(14,165,233,0.05)', borderRadius: '10px', border: '1px solid rgba(14,165,233,0.15)' }}>
+                        <p className="text-sm" style={{ color: 'var(--accent-secondary)', marginBottom: '4px', fontWeight: 500 }}>How it works</p>
+                        <p className="text-sm" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Burns Alpha and atomically returns native TAO to your wallet via the staking precompile.</p>
+                      </div>
+
+                      <button className="btn btn-secondary" style={{ width: '100%', padding: '13px' }} disabled={!account || status.type === 'loading' || !(allAlphaBalances[unstakeNetuid] && parseFloat(allAlphaBalances[unstakeNetuid]) > 0)} onClick={handleUnstake}>
+                        <ArrowRightLeft size={16} /> {unstakeAmount ? 'Unstake Alpha' : 'Unstake All Alpha'}
+                      </button>
+                    </div>
                   )}
                 </div>
-                <input 
-                  type="number" 
-                  className="input-field" 
-                  placeholder={allAlphaBalances[swapSourceNetuid] && parseFloat(allAlphaBalances[swapSourceNetuid]) > 0 ? `Max: ${parseFloat(allAlphaBalances[swapSourceNetuid]).toFixed(4)}` : "0.00"} 
-                  value={swapAmount} 
-                  onChange={(e) => setSwapAmount(e.target.value)} 
-                />
+
+                {/* My Subnet Positions List Card (Right Column) */}
+                <div className="glass-panel" style={{ padding: '28px', minHeight: '390px', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                    <Activity size={20} color="var(--accent-secondary)" />
+                    <h3 style={{ margin: 0, fontWeight: 700, fontSize: '18px', letterSpacing: '-0.02em' }}>Staking Positions</h3>
+                  </div>
+                  <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
+                    Your current on-chain stakes. Click on any position to load it into the form.
+                  </p>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
+                    {Object.entries(allAlphaBalances).filter(([_, bal]) => parseFloat(bal) > 0).length > 0 ? (
+                      Object.entries(allAlphaBalances)
+                        .filter(([_, bal]) => parseFloat(bal) > 0)
+                        .map(([id, bal]) => {
+                          const net = Number(id);
+                          const isCurrent = (stakingAction === 'stake' && netuid === net) ||
+                            (stakingAction === 'unstake' && unstakeNetuid === net) ||
+                            (stakingAction === 'swap' && swapSourceNetuid === net);
+                          return (
+                            <div
+                              key={id}
+                              style={{
+                                padding: '16px',
+                                borderRadius: '12px',
+                                background: isCurrent ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                                border: isCurrent ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                boxShadow: isCurrent ? '0 0 16px rgba(99, 102, 241, 0.15)' : 'none'
+                              }}
+                              onClick={() => handlePositionClick(net)}
+                              onMouseEnter={(e) => {
+                                if (!isCurrent) {
+                                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!isCurrent) {
+                                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
+                                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                                }
+                              }}
+                            >
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                  <span style={{ fontSize: '14px', fontWeight: 600, color: 'white' }}>
+                                    {net === 310 ? 'Alpha Subnet' : net === 0 ? 'Root Network' : `Subnet ${net}`}
+                                  </span>
+                                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)', fontFamily: 'var(--font-mono)' }}>
+                                    Netuid {net}
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                  Click to load subnet
+                                </span>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <span className="mono" style={{ fontSize: '16px', fontWeight: 600, color: 'var(--accent-secondary)' }}>
+                                  {parseFloat(bal).toFixed(4)}
+                                </span>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginLeft: '4px' }}>
+                                  ALPHA
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })
+                    ) : (
+                      <div style={{ padding: '32px', textAlign: 'center', borderRadius: '12px', border: '1px dashed var(--border-subtle)', background: 'rgba(255,255,255,0.01)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
+                        <Activity size={32} style={{ color: 'var(--text-muted)', marginBottom: '12px', opacity: 0.3 }} />
+                        <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>No active staking positions</p>
+                        <p style={{ fontSize: '11px', color: 'var(--text-muted)', opacity: 0.7, marginTop: '4px' }}>Stake TAO above to get started</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
+            )}
 
-              <button 
-                className="btn btn-primary" 
-                style={{ width: '100%', padding: '13px' }} 
-                disabled={!account || status.type === 'loading' || (swapAmount === '' && (!allAlphaBalances[swapSourceNetuid] || parseFloat(allAlphaBalances[swapSourceNetuid]) === 0))} 
-                onClick={handleSwap}
-              >
-                <ArrowRightLeft size={16} /> {swapAmount ? 'Swap Stake' : 'Swap All Alpha'}
-              </button>
-            </div>
-
-            {/* Remove Stake Panel */}
-            <div className="glass-panel" style={{ padding: '28px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                <ArrowRightLeft size={18} color="var(--accent-secondary)" />
-                <h3 style={{ margin: 0, fontWeight: 600 }}>Remove Stake</h3>
+            {/* Transaction History */}
+            {account && stakeHistory.length > 0 && (
+              <div className="glass-panel" style={{ padding: '24px', marginTop: '32px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                  <History size={18} color="var(--accent-secondary)" />
+                  <h3 style={{ margin: 0 }}>Transaction History</h3>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Type</th>
+                        <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Netuid</th>
+                        <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>TAO</th>
+                        <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Alpha</th>
+                        <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Block</th>
+                        <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Tx</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stakeHistory.map((ev, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                          <td style={{ padding: '10px 12px' }}>
+                            <span style={{
+                              padding: '2px 8px',
+                              borderRadius: '8px',
+                              border: '1px solid var(--border-subtle)',
+                              background: ev.type === 'stake' ? 'rgba(0,255,136,0.1)' : 'rgba(255,51,102,0.1)',
+                              color: ev.type === 'stake' ? 'var(--status-success)' : 'var(--status-error)',
+                              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)'
+                            }}>
+                              {ev.type === 'stake' ? 'STAKE' : 'UNSTAKE'}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono">{ev.netuid}</td>
+                          <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono">{ev.taoAmount}</td>
+                          <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono">{ev.alphaAmount}</td>
+                          <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono text-muted">{ev.blockNumber}</td>
+                          <td style={{ textAlign: 'right', padding: '10px 12px' }}>
+                            <a
+                              href={`https://evm-testnet.subtensor.io/tx/${ev.txHash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mono text-accent"
+                              style={{ fontSize: '11px', textDecoration: 'none' }}
+                            >
+                              {ev.txHash.substring(0, 10)}...
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Convert Alpha back to TAO. Leave blank to unstake all.</p>
-
-              <div style={{ marginBottom: '16px' }}>
-                <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Subnet (Netuid)</label>
-                <input type="number" className="input-field" value={unstakeNetuid} onChange={(e) => setUnstakeNetuid(Number(e.target.value))} />
-              </div>
-              <div style={{ marginBottom: '24px' }}>
-                <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span></label>
-                <input type="number" className="input-field" placeholder={`Max: ${parseFloat(myAlphaBalance).toFixed(4)}`} value={unstakeAmount} onChange={(e) => setUnstakeAmount(e.target.value)} />
-              </div>
-
-              <div style={{ marginBottom: '24px', padding: '14px', background: 'rgba(14,165,233,0.05)', borderRadius: '10px', border: '1px solid rgba(14,165,233,0.15)' }}>
-                <p className="text-sm" style={{ color: 'var(--accent-secondary)', marginBottom: '4px', fontWeight: 500 }}>How it works</p>
-                <p className="text-sm" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Burns Alpha and atomically returns native TAO to your wallet via the staking precompile.</p>
-              </div>
-
-              <button className="btn btn-secondary" style={{ width: '100%', padding: '13px' }} disabled={!account || status.type === 'loading' || !(allAlphaBalances[unstakeNetuid] && parseFloat(allAlphaBalances[unstakeNetuid]) > 0)} onClick={handleUnstake}>
-                <ArrowRightLeft size={16} /> {unstakeAmount ? 'Unstake Alpha' : 'Unstake All Alpha'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Transaction History */}
-        {account && stakeHistory.length > 0 && (
-          <div className="glass-panel" style={{ padding: '24px', marginTop: '32px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-              <History size={18} color="var(--accent-secondary)" />
-              <h3 style={{ margin: 0 }}>Transaction History</h3>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                    <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Type</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Netuid</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>TAO</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Alpha</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Block</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Tx</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stakeHistory.map((ev, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                      <td style={{ padding: '10px 12px' }}>
-                        <span style={{
-                          padding: '2px 8px',
-                          borderRadius: '8px', 
-                          border: '1px solid var(--border-subtle)',
-                          background: ev.type === 'stake' ? 'rgba(0,255,136,0.1)' : 'rgba(255,51,102,0.1)',
-                          color: ev.type === 'stake' ? 'var(--status-success)' : 'var(--status-error)',
-                          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)'
-                        }}>
-                          {ev.type === 'stake' ? 'STAKE' : 'UNSTAKE'}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono">{ev.netuid}</td>
-                      <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono">{ev.taoAmount}</td>
-                      <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono">{ev.alphaAmount}</td>
-                      <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono text-muted">{ev.blockNumber}</td>
-                      <td style={{ textAlign: 'right', padding: '10px 12px' }}>
-                        <a 
-                          href={`https://evm-testnet.subtensor.io/tx/${ev.txHash}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="mono text-accent" 
-                          style={{ fontSize: '11px', textDecoration: 'none' }}
-                        >
-                          {ev.txHash.substring(0, 10)}...
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+            )}
           </>
         ) : (
-          <ChatPortal 
+          <ChatPortal
             account={account}
             balance={balance}
             myAlphaBalance={myAlphaBalance}

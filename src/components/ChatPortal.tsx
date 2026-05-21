@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import type { FunctionDeclaration, ChatSession, GenerateContentResult } from '@google/generative-ai';
-import { Send, Bot, ArrowRightLeft, ShieldAlert, Activity, User } from 'lucide-react';
+import { Send, ArrowRightLeft, ShieldAlert, Activity, User } from 'lucide-react';
 
 interface ChatPortalProps {
   account: string;
@@ -89,7 +89,7 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
     tools: [{ functionDeclarations: [stakeTool, unstakeTool, swapTool, checkBalancesTool] }],
-    systemInstruction: "You are the SyncIntent OS AI assistant. You help users stake, unstake, and swap TAO/Alpha. Be concise, cyberpunk-styled, and helpful. If a user wants to stake, unstake, or swap, always use the tools provided to initiate the action rather than just explaining it."
+    systemInstruction: "You are the Terabitt AI Assistant. You help users stake, unstake, and swap TAO/Alpha. Be concise, cyberpunk-styled, and helpful. If a user wants to stake, unstake, or swap, always use the tools provided to initiate the action rather than just explaining it."
   });
 
   const [chatSession, setChatSession] = useState<ChatSession | null>(null);
@@ -97,7 +97,7 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
   useEffect(() => {
     if (!chatSession) {
       setChatSession(model.startChat({ history: [] }));
-      setMessages([{ role: 'model', text: 'Welcome to the SyncIntent Chat Portal. How can I assist you with your TAO operations today?' }]);
+      setMessages([{ role: 'model', text: 'Welcome to the Terabitt AI Chat Portal. How can I assist you with your TAO operations and subnet staking today?' }]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -233,8 +233,8 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
   return (
     <div className="glass-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: '20px', borderBottom: '1px solid var(--border-subtle)', background: 'rgba(0,0,0,0.2)' }}>
-        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Bot color="var(--accent-secondary)" size={24} /> SyncIntent OS Agent
+        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <img src="/logo-indigo.png" alt="Terabitt Logo" style={{ width: '22px', height: '22px', objectFit: 'contain' }} /> Terabitt AI Agent
           {account && <span className="status-indicator"></span>}
         </h3>
       </div>
@@ -255,8 +255,8 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
             marginBottom: '4px'
           }}>
             {msg.role === 'model' && (
-              <div style={{ flexShrink: 0, width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(14, 165, 233, 0.1)', color: 'var(--accent-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(14, 165, 233, 0.2)' }}>
-                <Bot size={18} />
+              <div style={{ flexShrink: 0, width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(99, 102, 241, 0.2)', padding: '7px' }}>
+                <img src="/logo-indigo.png" alt="Terabitt Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
               </div>
             )}
             
