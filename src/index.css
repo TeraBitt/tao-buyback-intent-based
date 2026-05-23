@@ -3956,6 +3956,47 @@ body {
   color: var(--text-2);
 }
 
+.history-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.history-pagination__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.history-pagination__button {
+  min-width: 78px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.history-pagination__button:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.history-pagination__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.history-pagination__page {
+  min-width: 78px;
+  text-align: center;
+}
+
 .empty {
   padding: 4rem 1rem;
   color: var(--text-3);
@@ -4022,9 +4063,15 @@ body {
 @media (max-width: 680px) {
   .chat-head,
   .swap-head,
-  .hist-top {
+  .hist-top,
+  .history-pagination {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .history-pagination__controls {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .msg,

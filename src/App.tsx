@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ethers } from 'ethers';
 import { blake2b } from 'blakejs';
 import {
@@ -50,9 +50,16 @@ interface StakeEvent {
   detail: string;
   amount: string;
   user: string;
+  solver?: string;
+  nonce?: string;
   txHash: string;
   blockNumber: number;
   timestamp: number;
+}
+
+interface HistoryCacheEntry {
+  events: StakeEvent[];
+  source: HistorySource;
 }
 
 interface StakingPositionSummary {
@@ -212,6 +219,13 @@ const DISPLAY_SUBNETS = [
 ];
 
 const CONTRACT_DEPLOY_BLOCK = 7147534;
+const HISTORY_LOG_PAGE_SIZE = 5000;
+const HISTORY_MAX_EVENTS = 150;
+const HISTORY_DECODE_CONCURRENCY = 2;
+const HISTORY_PAGE_SIZE = 10;
+const RPC_REQUEST_SPACING_MS = 300;
+const RPC_RATE_LIMIT_BACKOFF_MS = 2500;
+const RPC_MAX_RETRIES = 4;
 const INTENT_FILLED_TOPIC = ethers.id('IntentFilled(address,address,uint256)');
 const contractInterface = new ethers.Interface(CONTRACT_ABI);
 const stakingCallInterface = new ethers.Interface([
@@ -219,14 +233,16 @@ const stakingCallInterface = new ethers.Interface([
   'function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external',
   'function removeStakeFull(bytes32 hotkey, uint256 netuid) external',
 ]);
+const STAKING_PRECOMPILE_ADDRESS = '0x0000000000000000000000000000000000000805';
 
 // Single persistent JsonRpcProvider for all read-only calls
 const directProvider = new ethers.JsonRpcProvider(CONFIG.NETWORK.rpcUrls[0], undefined, {
   staticNetwork: true,
+  batchMaxCount: 1,
 });
 
 const stakingPrecompile = new ethers.Contract(
-  '0x0000000000000000000000000000000000000805',
+  STAKING_PRECOMPILE_ADDRESS,
   [
     'function getTotalAlphaStaked(bytes32 hotkey, uint256 netuid) external view returns (uint256)',
     'function getStake(bytes32 hotkey, bytes32 coldkey, uint256 netuid) external view returns (uint256)',
@@ -324,8 +340,6 @@ const normalizeAddress = (value: string) => {
   }
 };
 
-const isSameAddress = (left: string, right: string) => normalizeAddress(left) === normalizeAddress(right);
-
 const decodeIndexedAddress = (topic?: string) => {
   if (!topic || topic.length < 42) return '';
   return ethers.getAddress(`0x${topic.slice(-40)}`);
@@ -352,6 +366,19 @@ interface IntentCondition {
   netuid: number;
 }
 
+interface DecodedStakingCall {
+  name: 'addStake' | 'removeStake' | 'removeStakeFull';
+  hotkey: string;
+  amountRao?: bigint;
+  netuid: number;
+}
+
+interface RawRpcTransaction {
+  input?: string;
+  data?: string;
+  value?: string;
+}
+
 const mergeHistoryEvents = (...historyGroups: StakeEvent[][]) => {
   const merged = new Map<string, StakeEvent>();
 
@@ -368,6 +395,204 @@ const mergeHistoryEvents = (...historyGroups: StakeEvent[][]) => {
     (left, right) => right.timestamp - left.timestamp || right.blockNumber - left.blockNumber,
   );
 };
+
+const getHistoryCacheKey = (address?: string) => (address ? `wallet:${normalizeAddress(address)}` : 'contract');
+
+const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+let nextRpcRequestAt = 0;
+
+const waitForRpcSlot = async () => {
+  const now = Date.now();
+  const waitMs = Math.max(0, nextRpcRequestAt - now);
+  nextRpcRequestAt = Math.max(now, nextRpcRequestAt) + RPC_REQUEST_SPACING_MS;
+
+  if (waitMs > 0) {
+    await delay(waitMs);
+  }
+};
+
+const stringifyRpcError = (error: unknown) => {
+  const parts: string[] = [];
+
+  if (error instanceof Error) {
+    parts.push(error.message);
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const errorRecord = error as Record<string, unknown>;
+
+    for (const key of ['code', 'status', 'shortMessage', 'reason']) {
+      const value = errorRecord[key];
+      if (typeof value === 'string' || typeof value === 'number') {
+        parts.push(String(value));
+      }
+    }
+
+    try {
+      parts.push(JSON.stringify(errorRecord));
+    } catch {
+      // Some provider errors contain circular request objects.
+    }
+  }
+
+  return parts.join(' ').toLowerCase();
+};
+
+const isRetryableRpcError = (error: unknown) => {
+  const errorText = stringifyRpcError(error);
+  return (
+    errorText.includes('429') ||
+    errorText.includes('too many') ||
+    errorText.includes('rate limit') ||
+    errorText.includes('failed to fetch') ||
+    errorText.includes('cors') ||
+    errorText.includes('preflight')
+  );
+};
+
+const withRpcBackoff = async <Result,>(operation: () => Promise<Result>) => {
+  for (let attempt = 0; attempt <= RPC_MAX_RETRIES; attempt += 1) {
+    await waitForRpcSlot();
+
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt === RPC_MAX_RETRIES || !isRetryableRpcError(error)) {
+        throw error;
+      }
+
+      const backoffMs = RPC_RATE_LIMIT_BACKOFF_MS * 2 ** attempt;
+      nextRpcRequestAt = Math.max(nextRpcRequestAt, Date.now() + backoffMs);
+      await delay(backoffMs);
+    }
+  }
+
+  throw new Error('RPC request failed after retries');
+};
+
+const getAddressTopic = (address: string) => ethers.zeroPadValue(normalizeAddress(address), 32);
+
+const mapWithConcurrency = async <Item, Result>(
+  items: Item[],
+  limit: number,
+  mapper: (item: Item, index: number) => Promise<Result>,
+) => {
+  const results: Result[] = [];
+  let nextIndex = 0;
+  const workerCount = Math.min(limit, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      }
+    }),
+  );
+
+  return results;
+};
+
+const getTimestampFromNonce = (nonce?: string) => {
+  if (!nonce) return Date.now();
+
+  const numericNonce = Number(nonce);
+  if (!Number.isFinite(numericNonce)) return Date.now();
+
+  if (numericNonce > 1_000_000_000_000 && numericNonce < 10_000_000_000_000) {
+    return numericNonce;
+  }
+
+  if (numericNonce > 946_684_800 && numericNonce < 4_102_444_800) {
+    return numericNonce * 1000;
+  }
+
+  return Date.now();
+};
+
+const fetchIntentFilledLogs = async (userAddress?: string) => {
+  const latestBlock = await withRpcBackoff(() => directProvider.getBlockNumber());
+  const logs: ethers.Log[] = [];
+  const topics = userAddress ? [INTENT_FILLED_TOPIC, getAddressTopic(userAddress)] : [INTENT_FILLED_TOPIC];
+
+  for (let fromBlock = CONTRACT_DEPLOY_BLOCK; fromBlock <= latestBlock; fromBlock += HISTORY_LOG_PAGE_SIZE) {
+    const toBlock = Math.min(fromBlock + HISTORY_LOG_PAGE_SIZE - 1, latestBlock);
+    const pageLogs = await withRpcBackoff(() =>
+      directProvider.getLogs({
+        address: CONFIG.CONTRACT_ADDRESS,
+        topics,
+        fromBlock,
+        toBlock,
+      }),
+    );
+
+    logs.push(...pageLogs);
+  }
+
+  return logs
+    .sort((left, right) => right.blockNumber - left.blockNumber || right.index - left.index)
+    .slice(0, HISTORY_MAX_EVENTS);
+};
+
+const decodeStakingCall = (callData: string): DecodedStakingCall | null => {
+  try {
+    const parsedCall = stakingCallInterface.parseTransaction({ data: callData });
+    if (!parsedCall) return null;
+
+    if (parsedCall.name === 'addStake' || parsedCall.name === 'removeStake') {
+      const [hotkey, amountRao, targetNetuid] = parsedCall.args as unknown as [string, bigint, bigint];
+      return {
+        name: parsedCall.name,
+        hotkey,
+        amountRao,
+        netuid: Number(targetNetuid),
+      };
+    }
+
+    if (parsedCall.name === 'removeStakeFull') {
+      const [hotkey, targetNetuid] = parsedCall.args as unknown as [string, bigint];
+      return {
+        name: parsedCall.name,
+        hotkey,
+        netuid: Number(targetNetuid),
+      };
+    }
+  } catch (error) {
+    console.error('Failed to decode staking call from fillIntent:', error);
+  }
+
+  return null;
+};
+
+const decodeIntentLog = (log: ethers.Log) => {
+  try {
+    const parsedLog = contractInterface.parseLog({ topics: log.topics, data: log.data });
+    if (!parsedLog || parsedLog.name !== 'IntentFilled') {
+      return {
+        user: decodeIndexedAddress(log.topics[1]),
+        solver: decodeIndexedAddress(log.topics[2]),
+        nonce: '',
+      };
+    }
+
+    return {
+      user: String(parsedLog.args[0]),
+      solver: String(parsedLog.args[1]),
+      nonce: parsedLog.args[2]?.toString() ?? '',
+    };
+  } catch (error) {
+    console.error('Failed to decode IntentFilled event:', error);
+    return {
+      user: decodeIndexedAddress(log.topics[1]),
+      solver: decodeIndexedAddress(log.topics[2]),
+      nonce: '',
+    };
+  }
+};
+
+const escapeCsvValue = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 function App() {
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
@@ -396,9 +621,13 @@ function App() {
   const [appView, setAppView] = useState<AppView>('dashboard');
   const [stakingAction, setStakingAction] = useState<StakingAction>('stake');
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
+  const [historyPage, setHistoryPage] = useState(1);
   const [historySource, setHistorySource] = useState<HistorySource>('contract');
   const [status, setStatus] = useState<StatusState>({ type: 'idle', msg: '' });
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const historyCacheRef = useRef(new Map<string, HistoryCacheEntry>());
+  const historyRequestsRef = useRef(new Map<string, Promise<HistoryCacheEntry>>());
+  const isWalletConnectingRef = useRef(false);
 
   const decodeDelegations = (scaleBytes: unknown): { netuid: number; stake: number; hotkey: string }[] => {
     if (!scaleBytes) return [];
@@ -545,7 +774,7 @@ function App() {
       const hotkey = stakedHotkeys[netuid] || getHotkeyForNetuid(netuid);
 
       try {
-        const alpha = await stakingPrecompile.getTotalAlphaStaked(hotkey, netuid);
+        const alpha = await withRpcBackoff(() => stakingPrecompile.getTotalAlphaStaked(hotkey, netuid));
         setTotalAlphaStaked((Number(alpha) / 1e9).toString());
       } catch (error) {
         console.error('getTotalAlphaStaked failed:', error);
@@ -553,7 +782,7 @@ function App() {
       }
 
       try {
-        const myStake = await stakingPrecompile.getStake(hotkey, contractColdkey, netuid);
+        const myStake = await withRpcBackoff(() => stakingPrecompile.getStake(hotkey, contractColdkey, netuid));
         setMyAlphaBalance((Number(myStake) / 1e9).toString());
       } catch (error) {
         console.error('getStake failed:', error);
@@ -573,10 +802,12 @@ function App() {
       };
 
       try {
-        const [contractScaleBytes, walletScaleBytes] = await Promise.all([
+        const contractScaleBytes = await withRpcBackoff(() =>
           directProvider.send('delegateInfo_getDelegated', [hexToBytes(contractColdkey)]),
-          directProvider.send('delegateInfo_getDelegated', [hexToBytes(walletColdkey)]).catch(() => []),
-        ]);
+        );
+        const walletScaleBytes = await withRpcBackoff(() =>
+          directProvider.send('delegateInfo_getDelegated', [hexToBytes(walletColdkey)]),
+        ).catch(() => []);
 
         const contractPositions = decodeDelegations(contractScaleBytes);
         const walletPositions = decodeDelegations(walletScaleBytes);
@@ -612,156 +843,183 @@ function App() {
     }
   };
 
-  const fetchOnchainHistory = async (address?: string) => {
+  const fetchOnchainHistory = async (address?: string, options: { force?: boolean } = {}) => {
+    const cacheKey = getHistoryCacheKey(address);
+    const cachedHistory = historyCacheRef.current.get(cacheKey);
+
+    if (!options.force && cachedHistory) {
+      setHistorySource(cachedHistory.source);
+      setStakeHistory(cachedHistory.events);
+      setIsHistoryLoading(false);
+      return;
+    }
+
+    const pendingHistory = historyRequestsRef.current.get(cacheKey);
+    if (!options.force && pendingHistory) {
+      setIsHistoryLoading(true);
+      try {
+        const cachedEntry = await pendingHistory;
+        if (historyRequestsRef.current.get(cacheKey) === pendingHistory) {
+          setHistorySource(cachedEntry.source);
+          setStakeHistory(cachedEntry.events);
+        }
+      } finally {
+        setIsHistoryLoading(false);
+      }
+      return;
+    }
+
+    const historyRequest = (async (): Promise<HistoryCacheEntry> => {
+      const targetAddress = address ? normalizeAddress(address) : '';
+
+      const decodeHistoryLogs = async (logs: ethers.Log[]) => {
+        const orderedLogs = [...logs].sort(
+          (left, right) => right.blockNumber - left.blockNumber || right.index - left.index,
+        );
+
+        const decodedHistory = await mapWithConcurrency(
+          orderedLogs,
+          HISTORY_DECODE_CONCURRENCY,
+          async (log): Promise<StakeEvent | null> => {
+            try {
+              const intentEvent = decodeIntentLog(log);
+              const tx = (await withRpcBackoff(() =>
+                directProvider.send('eth_getTransactionByHash', [log.transactionHash]),
+              )) as RawRpcTransaction | null;
+              const txData = tx?.input ?? tx?.data;
+              if (!txData) return null;
+
+              const txValue = BigInt(tx?.value ?? '0x0');
+              const parsedTransaction = contractInterface.parseTransaction({ data: txData, value: txValue });
+              if (!parsedTransaction || parsedTransaction.name !== 'fillIntent') return null;
+
+              const intent = parsedTransaction.args[0] as {
+                user?: string;
+                calls: Array<{ callData: string }>;
+              };
+              const intentCalls = Array.isArray(intent.calls) ? intent.calls : [];
+              const decodedCalls = intentCalls
+                .map((call) => decodeStakingCall(call.callData))
+                .filter((call): call is DecodedStakingCall => Boolean(call));
+
+              if (decodedCalls.length === 0) return null;
+
+              const addCall = decodedCalls.find((call) => call.name === 'addStake');
+              const removeCall = decodedCalls.find(
+                (call) => call.name === 'removeStake' || call.name === 'removeStakeFull',
+              );
+              const timestamp = getTimestampFromNonce(intentEvent.nonce);
+              const user = intentEvent.user || (intent.user ? normalizeAddress(intent.user) : '');
+              const sharedEventDetails = {
+                user,
+                solver: intentEvent.solver,
+                nonce: intentEvent.nonce,
+                txHash: log.transactionHash,
+                blockNumber: log.blockNumber,
+                timestamp,
+              };
+
+              if (addCall && !removeCall) {
+                const stakeAmount =
+                  txValue > 0n
+                    ? ethers.formatEther(txValue)
+                    : ethers.formatUnits(addCall.amountRao ?? 0n, 9);
+                return {
+                  type: 'stake',
+                  title: 'Stake TAO',
+                  detail: `${getSubnetLabel(addCall.netuid)} • Hotkey ${formatShortValue(addCall.hotkey, 8, 6)}`,
+                  amount: `${formatTokenAmount(stakeAmount)} TAO`,
+                  ...sharedEventDetails,
+                };
+              }
+
+              if (removeCall && addCall) {
+                return {
+                  type: 'swap',
+                  title: 'Move stake',
+                  detail: `${getSubnetLabel(removeCall.netuid)} → ${getSubnetLabel(addCall.netuid)}`,
+                  amount:
+                    removeCall.name === 'removeStake'
+                      ? `${formatTokenAmount(ethers.formatUnits(removeCall.amountRao ?? 0n, 9))} ALPHA`
+                      : 'All ALPHA',
+                  ...sharedEventDetails,
+                };
+              }
+
+              if (removeCall) {
+                return {
+                  type: 'unstake',
+                  title: 'Unstake Alpha',
+                  detail: `${getSubnetLabel(removeCall.netuid)} • Hotkey ${formatShortValue(removeCall.hotkey, 8, 6)}`,
+                  amount:
+                    removeCall.name === 'removeStake'
+                      ? `${formatTokenAmount(ethers.formatUnits(removeCall.amountRao ?? 0n, 9))} ALPHA`
+                      : 'All ALPHA',
+                  ...sharedEventDetails,
+                };
+              }
+
+              return null;
+            } catch (error) {
+              console.error('Failed to reconstruct on-chain history entry:', error);
+              return null;
+            }
+          },
+        );
+
+        return decodedHistory
+          .filter((event): event is StakeEvent => Boolean(event))
+          .sort((left, right) => right.timestamp - left.timestamp || right.blockNumber - left.blockNumber);
+      };
+
+      let historySourceForLogs: HistorySource = 'contract';
+      let logs = targetAddress ? await fetchIntentFilledLogs(targetAddress) : await fetchIntentFilledLogs();
+
+      if (targetAddress && logs.length > 0) {
+        historySourceForLogs = 'wallet';
+      } else if (targetAddress) {
+        logs = await fetchIntentFilledLogs();
+      }
+
+      let nextHistory = await decodeHistoryLogs(logs);
+
+      if (targetAddress && historySourceForLogs === 'wallet' && nextHistory.length === 0) {
+        historySourceForLogs = 'contract';
+        nextHistory = await decodeHistoryLogs(await fetchIntentFilledLogs());
+      }
+
+      return {
+        events: nextHistory,
+        source: historySourceForLogs,
+      };
+    })();
+
+    historyRequestsRef.current.set(cacheKey, historyRequest);
     setIsHistoryLoading(true);
 
     try {
-      const targetAddress = address ? normalizeAddress(address) : '';
-      const blockCache = new Map<number, Promise<ethers.Block | null>>();
-      const getBlock = (blockNumber: number) => {
-        let existing = blockCache.get(blockNumber);
-        if (!existing) {
-          existing = directProvider.getBlock(blockNumber);
-          blockCache.set(blockNumber, existing);
-        }
-        return existing;
-      };
-
-      const logs = await directProvider.getLogs({
-        address: CONFIG.CONTRACT_ADDRESS,
-        topics: [INTENT_FILLED_TOPIC],
-        fromBlock: CONTRACT_DEPLOY_BLOCK,
-        toBlock: 'latest',
-      });
-
-      const history = await Promise.all(
-        logs.map(async (log): Promise<StakeEvent | null> => {
-          try {
-            const tx = await directProvider.getTransaction(log.transactionHash);
-            if (!tx?.data) return null;
-
-            const parsedTransaction = contractInterface.parseTransaction({ data: tx.data, value: tx.value });
-            if (!parsedTransaction || parsedTransaction.name !== 'fillIntent') return null;
-
-            const intent = parsedTransaction.args[0] as {
-              calls: Array<{ callData: string }>;
-            };
-            const decodedCalls = intent.calls
-              .map((call) => {
-                try {
-                  return stakingCallInterface.parseTransaction({ data: call.callData });
-                } catch (error) {
-                  console.error('Failed to decode staking call from fillIntent:', error);
-                  return null;
-                }
-              })
-              .filter((call): call is NonNullable<typeof call> => Boolean(call));
-
-            if (decodedCalls.length === 0) return null;
-
-            const firstCall = decodedCalls[0];
-            const secondCall = decodedCalls[1] ?? null;
-            const block = await getBlock(log.blockNumber);
-            const timestamp = Number(block?.timestamp ?? Math.floor(Date.now() / 1000)) * 1000;
-            const user = decodeIndexedAddress(log.topics[1]);
-
-            if (decodedCalls.some((call) => call.name === 'addStake') && !decodedCalls.some((call) => call.name.startsWith('removeStake'))) {
-              const [hotkey, amountRao, targetNetuid] = firstCall.args as unknown as [string, bigint, bigint];
-              const stakeAmount = tx.value > 0n ? ethers.formatEther(tx.value) : ethers.formatUnits(amountRao, 9);
-              return {
-                type: 'stake',
-                title: 'Stake TAO',
-                detail: `${getSubnetLabel(Number(targetNetuid))} • Hotkey ${formatShortValue(hotkey, 8, 6)}`,
-                amount: `${formatTokenAmount(stakeAmount)} TAO`,
-                user,
-                txHash: log.transactionHash,
-                blockNumber: log.blockNumber,
-                timestamp,
-              };
-            }
-
-            if (decodedCalls.some((call) => call.name.startsWith('removeStake')) && decodedCalls.some((call) => call.name === 'addStake') && secondCall) {
-              const [, sourceAmountRao, sourceNetuid] =
-                firstCall.name === 'removeStake'
-                  ? (firstCall.args as unknown as [string, bigint, bigint])
-                  : ([firstCall.args[0], 0n, firstCall.args[1]] as [string, bigint, bigint]);
-              const [, , targetNetuid] = secondCall.args as unknown as [string, bigint, bigint];
-
-              return {
-                type: 'swap',
-                title: 'Move stake',
-                detail: `${getSubnetLabel(Number(sourceNetuid))} → ${getSubnetLabel(Number(targetNetuid))}`,
-                amount:
-                  firstCall.name === 'removeStake'
-                    ? `${formatTokenAmount(ethers.formatUnits(sourceAmountRao, 9))} ALPHA`
-                    : 'All ALPHA',
-                user,
-                txHash: log.transactionHash,
-                blockNumber: log.blockNumber,
-                timestamp,
-              };
-            }
-
-            if (decodedCalls.some((call) => call.name.startsWith('removeStake'))) {
-              if (firstCall.name === 'removeStake') {
-                const [hotkey, amountRao, targetNetuid] = firstCall.args as unknown as [string, bigint, bigint];
-                return {
-                  type: 'unstake',
-                  title: 'Unstake Alpha',
-                  detail: `${getSubnetLabel(Number(targetNetuid))} • Hotkey ${formatShortValue(hotkey, 8, 6)}`,
-                  amount: `${formatTokenAmount(ethers.formatUnits(amountRao, 9))} ALPHA`,
-                  user,
-                  txHash: log.transactionHash,
-                  blockNumber: log.blockNumber,
-                  timestamp,
-                };
-              }
-
-              if (firstCall.name === 'removeStakeFull') {
-                const [hotkey, targetNetuid] = firstCall.args as unknown as [string, bigint];
-                return {
-                  type: 'unstake',
-                  title: 'Unstake Alpha',
-                  detail: `${getSubnetLabel(Number(targetNetuid))} • Hotkey ${formatShortValue(hotkey, 8, 6)}`,
-                  amount: 'All ALPHA',
-                  user,
-                  txHash: log.transactionHash,
-                  blockNumber: log.blockNumber,
-                  timestamp,
-                };
-              }
-            }
-
-            return null;
-          } catch (error) {
-            console.error('Failed to reconstruct on-chain history entry:', error);
-            return null;
-          }
-        }),
-      );
-
-      const reconstructedHistory = history
-        .filter((event): event is StakeEvent => Boolean(event))
-        .sort((left, right) => right.timestamp - left.timestamp || right.blockNumber - left.blockNumber);
-
-      const walletHistory = targetAddress
-        ? reconstructedHistory.filter((event) => event.user && isSameAddress(event.user, targetAddress))
-        : [];
-      const nextHistory = walletHistory.length > 0 ? walletHistory : reconstructedHistory;
-
-      setHistorySource(walletHistory.length > 0 ? 'wallet' : 'contract');
-      setStakeHistory(nextHistory);
+      const nextHistoryEntry = await historyRequest;
+      if (historyRequestsRef.current.get(cacheKey) === historyRequest) {
+        historyCacheRef.current.set(cacheKey, nextHistoryEntry);
+        setHistorySource(nextHistoryEntry.source);
+        setStakeHistory(nextHistoryEntry.events);
+      }
     } catch (error) {
-      console.error('Failed to fetch contract-backed history:', error);
-      setHistorySource('contract');
-      setStakeHistory([]);
+      if (historyRequestsRef.current.get(cacheKey) === historyRequest) {
+        console.error('Failed to fetch contract-backed history:', error);
+        setHistorySource('contract');
+        setStakeHistory([]);
+      }
     } finally {
+      if (historyRequestsRef.current.get(cacheKey) === historyRequest) {
+        historyRequestsRef.current.delete(cacheKey);
+      }
       setIsHistoryLoading(false);
     }
   };
 
   useEffect(() => {
-    if (!provider || !account) return undefined;
+    if (surface !== 'app' || appView === 'history' || !provider || !account) return undefined;
 
     const timer = window.setTimeout(() => {
       if (typeof netuid === 'number' && netuid >= 0) {
@@ -771,7 +1029,7 @@ function App() {
 
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [netuid, account, provider]);
+  }, [netuid, account, provider, surface, appView]);
 
   const clearWalletState = () => {
     setIsWalletHydrating(false);
@@ -791,7 +1049,9 @@ function App() {
     setWalletType(null);
     setShowWalletModal(false);
     localStorage.removeItem('connected_wallet');
-    void fetchOnchainHistory();
+    if (appView === 'history') {
+      void fetchOnchainHistory();
+    }
   };
 
   const disconnectWallet = async () => {
@@ -821,6 +1081,9 @@ function App() {
       setStatus({ type: 'error', msg: `${selectedWallet === 'talisman' ? 'Talisman' : 'MetaMask'} not installed` });
       return;
     }
+
+    if (isWalletConnectingRef.current) return;
+    isWalletConnectingRef.current = true;
 
     try {
       setIsWalletHydrating(true);
@@ -868,7 +1131,9 @@ function App() {
       setShowWalletModal(false);
       setStakeHistory([]);
       setSessionStakeHistory([]);
-      await Promise.all([fetchStats(prov, address), fetchOnchainHistory(address)]);
+      if (surface === 'app' && appView === 'history') {
+        await fetchOnchainHistory(address);
+      }
 
       setIsWalletHydrating(false);
       setStatus({ type: 'idle', msg: '' });
@@ -876,6 +1141,8 @@ function App() {
       console.error(error);
       setIsWalletHydrating(false);
       setStatus({ type: 'error', msg: error instanceof Error ? error.message : 'Failed to connect' });
+    } finally {
+      isWalletConnectingRef.current = false;
     }
   };
 
@@ -1065,7 +1332,8 @@ function App() {
           ),
         );
         setStatus({ type: 'success', msg: 'Stake intent executed successfully.' });
-        await Promise.all([fetchStats(provider!, account), fetchOnchainHistory(account)]);
+        await fetchStats(provider!, account);
+        await fetchOnchainHistory(account, { force: true });
         return true;
       }
 
@@ -1150,7 +1418,8 @@ function App() {
           ),
         );
         setStatus({ type: 'success', msg: 'Unstake intent executed successfully.' });
-        await Promise.all([fetchStats(provider!, account), fetchOnchainHistory(account)]);
+        await fetchStats(provider!, account);
+        await fetchOnchainHistory(account, { force: true });
         return true;
       }
 
@@ -1194,7 +1463,7 @@ function App() {
       let priceInRao = 1000000000n;
       try {
         setStatus({ type: 'loading', msg: 'Fetching Alpha spot exchange rate...' });
-        const priceRes = await directProvider.send('swap_currentAlphaPrice', [sourceNetuid]);
+        const priceRes = await withRpcBackoff(() => directProvider.send('swap_currentAlphaPrice', [sourceNetuid]));
         if (priceRes) {
           priceInRao = BigInt(priceRes);
         }
@@ -1259,7 +1528,8 @@ function App() {
           ),
         );
         setStatus({ type: 'success', msg: 'Subnet rotation executed successfully.' });
-        await Promise.all([fetchStats(provider!, account), fetchOnchainHistory(account)]);
+        await fetchStats(provider!, account);
+        await fetchOnchainHistory(account, { force: true });
         return true;
       }
 
@@ -1310,6 +1580,9 @@ function App() {
   const openApp = (view: AppView = 'chat') => {
     setSurface('app');
     setAppView(view);
+    if (view === 'history') {
+      void fetchOnchainHistory(account || undefined);
+    }
   };
 
   const renderWalletCardStyle = (option: WalletOption): CSSProperties =>
@@ -1342,16 +1615,50 @@ function App() {
   const combinedHistory = mergeHistoryEvents(stakeHistory, sessionStakeHistory);
   const filteredHistory =
     historyFilter === 'all' ? combinedHistory : combinedHistory.filter((event) => event.type === historyFilter);
+  const historyPageCount = Math.max(1, Math.ceil(filteredHistory.length / HISTORY_PAGE_SIZE));
+  const currentHistoryPage = Math.min(historyPage, historyPageCount);
+  const paginatedHistory = filteredHistory.slice(
+    (currentHistoryPage - 1) * HISTORY_PAGE_SIZE,
+    currentHistoryPage * HISTORY_PAGE_SIZE,
+  );
+  const historyPageStart = filteredHistory.length > 0 ? (currentHistoryPage - 1) * HISTORY_PAGE_SIZE + 1 : 0;
+  const historyPageEnd = Math.min(currentHistoryPage * HISTORY_PAGE_SIZE, filteredHistory.length);
   const historyNote =
     historySource === 'wallet' && account
-      ? `Showing confirmed fills for ${formatShortValue(account, 6, 4)}.`
+      ? `Showing decoded IntentFilled events for ${formatShortValue(account, 6, 4)}.`
       : account
-        ? 'Showing recent confirmed contract activity. This wallet has no direct fillIntent events yet.'
-        : 'Showing recent confirmed activity from the intent contract.';
+        ? 'No decoded activity for this wallet yet. Showing latest decoded contract events.'
+        : 'Showing latest decoded IntentFilled events from the intent contract.';
   const selectedStakeSubnet = getSubnetPresentation(netuid);
   const selectedSwapSourceSubnet = getSubnetPresentation(swapSourceNetuid);
   const selectedSwapTargetSubnet = getSubnetPresentation(swapTargetNetuid);
   const selectedUnstakeSubnet = getSubnetPresentation(unstakeNetuid);
+
+  const handleExportHistory = () => {
+    const rows = [
+      ['Date', 'Type', 'Details', 'Amount', 'User', 'Solver', 'Nonce', 'Status', 'Tx Hash'],
+      ...filteredHistory.map((event) => [
+        new Date(event.timestamp).toISOString(),
+        event.title,
+        event.detail,
+        event.amount,
+        event.user,
+        event.solver ?? '',
+        event.nonce ?? '',
+        'Done',
+        event.txHash,
+      ]),
+    ];
+    const csv = rows.map((row) => row.map(escapeCsvValue).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `taochat-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const renderWalletModalOption = (option: WalletOption) => {
     const isConnecting = connectingWallet === option.id;
@@ -1822,7 +2129,12 @@ function App() {
     <div className="hist-wrap">
       <div className="hist-top">
         <h2>History</h2>
-        <button type="button" className="tao-btn tao-btn--ghost tao-btn--small">
+        <button
+          type="button"
+          className="tao-btn tao-btn--ghost tao-btn--small"
+          onClick={handleExportHistory}
+          disabled={filteredHistory.length === 0}
+        >
           Export CSV
         </button>
       </div>
@@ -1838,7 +2150,10 @@ function App() {
             key={filter.id}
             type="button"
             className={`fp ${historyFilter === filter.id ? 'on' : ''}`}
-            onClick={() => setHistoryFilter(filter.id)}
+            onClick={() => {
+              setHistoryFilter(filter.id);
+              setHistoryPage(1);
+            }}
           >
             {filter.label}
           </button>
@@ -1854,46 +2169,75 @@ function App() {
           <div className="empty-d">Fetching confirmed stake, unstake, and move intents from the contract.</div>
         </div>
       ) : filteredHistory.length > 0 ? (
-        <table className="htable">
-          <thead>
-            <tr>
-              <th style={{ width: '130px' }}>Date</th>
-              <th style={{ width: '110px' }}>Type</th>
-              <th>Details</th>
-              <th style={{ width: '120px' }}>Amount</th>
-              <th style={{ width: '85px' }}>Status</th>
-              <th style={{ width: '105px' }}>Tx Hash</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredHistory.map((event) => (
-              <tr key={`${event.txHash}-${event.timestamp}`}>
-                <td style={{ color: 'var(--text-2)' }}>{formatHistoryTime(event.timestamp)}</td>
-                <td>
-                  <span className={`tt ${event.type === 'stake' ? 'tt-s' : event.type === 'unstake' ? 'tt-u' : 'tt-x'}`}>
-                    {event.type === 'stake' ? '↑ Stake' : event.type === 'unstake' ? '↓ Unstake' : '⇄ Move'}
-                  </span>
-                </td>
-                <td>{event.detail}</td>
-                <td className={event.type === 'unstake' ? 'amt-n' : 'amt-p'}>
-                  {event.type === 'unstake' ? '−' : '+'}
-                  {event.amount}
-                </td>
-                <td className="tx-ok">✓ Done</td>
-                <td>
-                  <a
-                    href={`${EXPLORER_BASE_URL}${event.txHash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="tx-hash"
-                  >
-                    {formatShortValue(event.txHash, 10, 6)}
-                  </a>
-                </td>
+        <>
+          <table className="htable">
+            <thead>
+              <tr>
+                <th style={{ width: '130px' }}>Date</th>
+                <th style={{ width: '110px' }}>Type</th>
+                <th>Details</th>
+                <th style={{ width: '120px' }}>Amount</th>
+                <th style={{ width: '85px' }}>Status</th>
+                <th style={{ width: '105px' }}>Tx Hash</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {paginatedHistory.map((event) => (
+                <tr key={`${event.txHash}-${event.timestamp}`}>
+                  <td style={{ color: 'var(--text-2)' }}>{formatHistoryTime(event.timestamp)}</td>
+                  <td>
+                    <span className={`tt ${event.type === 'stake' ? 'tt-s' : event.type === 'unstake' ? 'tt-u' : 'tt-x'}`}>
+                      {event.type === 'stake' ? '↑ Stake' : event.type === 'unstake' ? '↓ Unstake' : '⇄ Move'}
+                    </span>
+                  </td>
+                  <td>{event.detail}</td>
+                  <td className={event.type === 'unstake' ? 'amt-n' : 'amt-p'}>
+                    {event.type === 'unstake' ? '−' : '+'}
+                    {event.amount}
+                  </td>
+                  <td className="tx-ok">✓ Done</td>
+                  <td>
+                    <a
+                      href={`${EXPLORER_BASE_URL}${event.txHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="tx-hash"
+                    >
+                      {formatShortValue(event.txHash, 10, 6)}
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="history-pagination">
+            <div className="history-pagination__range">
+              Showing {historyPageStart}-{historyPageEnd} of {filteredHistory.length}
+            </div>
+            <div className="history-pagination__controls">
+              <button
+                type="button"
+                className="history-pagination__button"
+                onClick={() => setHistoryPage(Math.max(1, currentHistoryPage - 1))}
+                disabled={currentHistoryPage === 1}
+              >
+                Previous
+              </button>
+              <span className="history-pagination__page">
+                Page {currentHistoryPage} of {historyPageCount}
+              </span>
+              <button
+                type="button"
+                className="history-pagination__button"
+                onClick={() => setHistoryPage(Math.min(historyPageCount, currentHistoryPage + 1))}
+                disabled={currentHistoryPage === historyPageCount}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </>
       ) : (
         <div className="empty">
           <div className="empty-ic">☰</div>
