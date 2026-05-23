@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
-import type { FunctionDeclaration, ChatSession, GenerateContentResult } from '@google/generative-ai';
-import { Send, ArrowRightLeft, ShieldAlert, Activity, User } from 'lucide-react';
+import type { ChatSession, FunctionDeclaration, GenerateContentResult } from '@google/generative-ai';
+import { Activity, Send, ShieldAlert, Wallet } from 'lucide-react';
 
 interface ChatPortalProps {
   account: string;
@@ -13,57 +13,63 @@ interface ChatPortalProps {
   executeStake: (amount: string, netuid: number) => Promise<boolean>;
   executeUnstake: (netuid: number, amount?: string) => Promise<boolean>;
   executeSwap: (sourceNetuid: number, targetNetuid: number, amount: string) => Promise<boolean>;
-  status: { type: 'idle' | 'loading' | 'success' | 'error', msg: string };
+  status: { type: 'idle' | 'loading' | 'success' | 'error'; msg: string };
   openWalletSelector: () => void;
+  disconnectWallet: () => void;
 }
 
 const stakeTool: FunctionDeclaration = {
   name: 'initiate_stake',
-  description: 'Show a UI to the user to confirm staking TAO to get Alpha.',
+  description: 'Prepare a UI confirmation for staking TAO into a Bittensor subnet.',
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
-      amount: { type: SchemaType.STRING, description: 'Amount of TAO to stake (e.g. "1.5")' },
-      netuid: { type: SchemaType.NUMBER, description: 'Netuid to stake into (default 310)' }
+      amount: { type: SchemaType.STRING, description: 'Amount of TAO to stake, such as "1.5"' },
+      netuid: { type: SchemaType.NUMBER, description: 'Target Bittensor netuid, usually 310 by default' },
     },
-    required: ['amount', 'netuid']
-  }
+    required: ['amount', 'netuid'],
+  },
 };
 
 const unstakeTool: FunctionDeclaration = {
   name: 'initiate_unstake',
-  description: 'Show a UI to the user to confirm unstaking Alpha from a netuid. Can be partial or full unstake.',
+  description: 'Prepare a UI confirmation for unstaking Alpha from a Bittensor subnet.',
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
-      netuid: { type: SchemaType.NUMBER, description: 'Netuid to unstake from (default 310)' },
-      amount: { type: SchemaType.STRING, description: 'Amount of Alpha to unstake. Omit to unstake ALL alpha.' }
+      netuid: { type: SchemaType.NUMBER, description: 'Netuid to unstake from, usually 310 by default' },
+      amount: {
+        type: SchemaType.STRING,
+        description: 'Amount of Alpha to unstake. Omit to fully exit the subnet position.',
+      },
     },
-    required: ['netuid']
-  }
+    required: ['netuid'],
+  },
 };
 
 const swapTool: FunctionDeclaration = {
   name: 'initiate_swap',
-  description: 'Show a UI to the user to confirm swapping Alpha stake from one Netuid (source subnet) to another Netuid (target subnet).',
+  description:
+    'Prepare a UI confirmation for moving Alpha stake from one Bittensor subnet to another on the same chain.',
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
-      sourceNetuid: { type: SchemaType.NUMBER, description: 'Source Netuid to unstake Alpha from (default 310)' },
-      targetNetuid: { type: SchemaType.NUMBER, description: 'Target Netuid to stake Alpha into' },
-      amount: { type: SchemaType.STRING, description: 'Amount of Alpha/TAO to swap' }
+      sourceNetuid: { type: SchemaType.NUMBER, description: 'Source netuid that currently holds the Alpha stake' },
+      targetNetuid: { type: SchemaType.NUMBER, description: 'Destination netuid that should receive the stake' },
+      amount: { type: SchemaType.STRING, description: 'Amount of Alpha to move between the two subnets' },
     },
-    required: ['sourceNetuid', 'targetNetuid', 'amount']
-  }
+    required: ['sourceNetuid', 'targetNetuid', 'amount'],
+  },
 };
 
 const checkBalancesTool: FunctionDeclaration = {
   name: 'check_balances',
-  description: 'Get the user\'s current on-chain balances for TAO and their staked Alpha across all netuids. This allows answering questions like "What is my stake on netuid X?"',
+  description:
+    'Read the user current TAO balance and Alpha balances by netuid so the assistant can answer state-aware questions.',
   parameters: {
     type: SchemaType.OBJECT,
-    properties: {}
-  }
+    properties: {},
+  },
 };
 
 interface ChatMessage {
@@ -77,52 +83,105 @@ interface ChatMessage {
   };
 }
 
-export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaBalances, currentNetuid, executeStake, executeUnstake, executeSwap, status, openWalletSelector }: ChatPortalProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+const QUICK_PROMPTS = [
+  'Stake 100 TAO on the best subnet',
+  'Move half my Subnet 310 position to Subnet 19',
+  'Unstake my Subnet 19 position',
+  'What is Subnet 27?',
+];
+
+const INPUT_HINTS = [
+  { label: '↑ Stake', prompt: 'Stake 50 TAO on Subnet 19' },
+  { label: '↓ Unstake', prompt: 'Unstake my Subnet 27 position' },
+  { label: '⇄ Move', prompt: 'Move 2 ALPHA from Subnet 310 to Subnet 19' },
+  { label: '↗ Top subnet', prompt: 'What is the top subnet right now?' },
+  { label: '⬡ Research', prompt: 'What does Subnet 4 do?' },
+];
+
+export default function ChatPortal({
+  account,
+  balance,
+  myAlphaBalance,
+  allAlphaBalances,
+  currentNetuid,
+  executeStake,
+  executeUnstake,
+  executeSwap,
+  status,
+  openWalletSelector,
+  disconnectWallet,
+}: ChatPortalProps) {
+  const initialMessage = import.meta.env.VITE_GEMINI_API_KEY
+    ? "Hey! I'm TaoChat — I can help you stake, unstake, swap, and research Bittensor subnets in plain English."
+    : 'The AI chat surface is wired into the dashboard, but `VITE_GEMINI_API_KEY` is still missing. The staking dashboard is already usable while chat credentials are being added.';
+
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [{ role: 'model', text: initialMessage }]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Initialize AI
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const genAI = new GoogleGenerativeAI(apiKey || '');
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    tools: [{ functionDeclarations: [stakeTool, unstakeTool, swapTool, checkBalancesTool] }],
-    systemInstruction: "You are the Terabitt AI Assistant. You help users stake, unstake, and swap TAO/Alpha. Be concise, cyberpunk-styled, and helpful. If a user wants to stake, unstake, or swap, always use the tools provided to initiate the action rather than just explaining it."
-  });
+  const model = apiKey
+    ? new GoogleGenerativeAI(apiKey).getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        tools: [{ functionDeclarations: [stakeTool, unstakeTool, swapTool, checkBalancesTool] }],
+        systemInstruction:
+          'You are TaoChat for a Bittensor staking dashboard. Help users stake TAO, unstake Alpha, and move positions between Bittensor subnets. Cross-chain deposits are not live yet, so if a user asks about SOL, ETH, bridging, or cross-chain, clearly say it is coming soon and steer them toward the live on-chain staking flows. Be concise, clear, and action-oriented. When the user wants to act, always call the provided tool instead of only describing the action.',
+      })
+    : null;
 
-  const [chatSession, setChatSession] = useState<ChatSession | null>(null);
-
-  useEffect(() => {
-    if (!chatSession) {
-      setChatSession(model.startChat({ history: [] }));
-      setMessages([{ role: 'model', text: 'Welcome to the Terabitt AI Chat Portal. How can I assist you with your TAO operations and subnet staking today?' }]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [chatSession] = useState<ChatSession | null>(() => (model ? model.startChat({ history: [] }) : null));
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const adjustTextareaHeight = () => {
+    const element = textareaRef.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, 160)}px`;
+  };
+
+  const formatShortValue = (value: string, start = 6, end = 4) => {
+    if (!value) return '';
+    return `${value.slice(0, start)}...${value.slice(-end)}`;
+  };
+
+  const chatReady = Boolean(chatSession);
+
+  const dismissAction = (messageIndex: number) => {
+    setMessages((prev) =>
+      prev.map((message, index) => (index === messageIndex ? { ...message, action: undefined } : message)),
+    );
+  };
+
   const handleSend = async () => {
     if (!input.trim() || !chatSession) return;
 
-    const userText = input;
+    const userText = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', text: userText }]);
+    setMessages((prev) => [...prev, { role: 'user', text: userText }]);
     setLoading(true);
+
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
 
     try {
       const result = await chatSession.sendMessage(userText);
       await processResponse(result);
-    } catch (err: unknown) {
-      console.error(err);
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setMessages(prev => [...prev, { role: 'model', text: 'Error communicating with the network: ' + errorMessage }]);
+    } catch (error: unknown) {
+      console.error(error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'model',
+          text: `I hit a network issue while preparing that response: ${errorMessage}`,
+        },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -141,61 +200,77 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
               taoBalance: balance,
               currentNetuidAlphaBalance: myAlphaBalance,
               allAlphaBalancesByNetuid: allAlphaBalances,
-              currentNetuid: currentNetuid
-            }
+              currentNetuid,
+            },
           };
           const nextResult = await chatSession.sendMessage([{ functionResponse }]);
           await processResponse(nextResult);
-        }
-        else if (call.name === 'initiate_stake') {
-          const { amount, netuid } = call.args as { amount: string, netuid: number };
-          setMessages(prev => [...prev, {
-            role: 'model',
-            text: `I've prepared a staking transaction for ${amount} TAO into Netuid ${netuid}. Please confirm:`,
-            action: { type: 'stake', amount, netuid }
-          }]);
-        }
-        else if (call.name === 'initiate_unstake' && chatSession) {
-          const { netuid, amount } = call.args as { netuid: number, amount?: string };
-          const alphaOnNetuid = parseFloat(allAlphaBalances[netuid] || '0');
+        } else if (call.name === 'initiate_stake') {
+          const { amount, netuid } = call.args as { amount: string; netuid: number };
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'model',
+              text: `I drafted a staking intent for ${amount} TAO into Netuid ${netuid}. Review it below and confirm when you are ready.`,
+              action: { type: 'stake', amount, netuid },
+            },
+          ]);
+        } else if (call.name === 'initiate_unstake' && chatSession) {
+          const { netuid, amount } = call.args as { netuid: number; amount?: string };
+          const alphaOnNetuid = Number.parseFloat(allAlphaBalances[netuid] || '0');
+
           if (alphaOnNetuid <= 0) {
             const functionResponse = {
               name: call.name,
-              response: { error: `User has 0 Alpha staked on netuid ${netuid}. Cannot unstake.` }
+              response: {
+                error: `User has no Alpha staked on netuid ${netuid}.`,
+              },
             };
             const nextResult = await chatSession.sendMessage([{ functionResponse }]);
             await processResponse(nextResult);
           } else {
-            setMessages(prev => [...prev, {
-              role: 'model',
-              text: `I've prepared an unstake transaction for ${amount ? amount + ' Alpha' : 'all your Alpha'} from Netuid ${netuid}. Please confirm:`,
-              action: { type: 'unstake', netuid, amount }
-            }]);
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: 'model',
+                text: `I prepared an unstake intent for ${amount ? `${amount} Alpha` : 'the full Alpha position'} on Netuid ${netuid}.`,
+                action: { type: 'unstake', netuid, amount },
+              },
+            ]);
           }
-        }
-        else if (call.name === 'initiate_swap' && chatSession) {
-          const { sourceNetuid, targetNetuid, amount } = call.args as { sourceNetuid: number, targetNetuid: number, amount: string };
-          const alphaOnSource = parseFloat(allAlphaBalances[sourceNetuid] || '0');
-          if (alphaOnSource < parseFloat(amount)) {
+        } else if (call.name === 'initiate_swap' && chatSession) {
+          const { sourceNetuid, targetNetuid, amount } = call.args as {
+            sourceNetuid: number;
+            targetNetuid: number;
+            amount: string;
+          };
+          const alphaOnSource = Number.parseFloat(allAlphaBalances[sourceNetuid] || '0');
+
+          if (alphaOnSource < Number.parseFloat(amount)) {
             const functionResponse = {
               name: call.name,
-              response: { error: `Insufficient Alpha balance on source Netuid ${sourceNetuid}. You only have ${alphaOnSource} Alpha.` }
+              response: {
+                error: `User only has ${alphaOnSource} Alpha on source Netuid ${sourceNetuid}.`,
+              },
             };
             const nextResult = await chatSession.sendMessage([{ functionResponse }]);
             await processResponse(nextResult);
           } else {
-            setMessages(prev => [...prev, {
-              role: 'model',
-              text: `I've prepared a Swap intent to move ${amount} Alpha from Netuid ${sourceNetuid} to Netuid ${targetNetuid}. Please confirm:`,
-              action: { type: 'swap', netuid: sourceNetuid, targetNetuid, amount }
-            }]);
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: 'model',
+                text: `I prepared a subnet rotation for ${amount} Alpha from Netuid ${sourceNetuid} to Netuid ${targetNetuid}.`,
+                action: { type: 'swap', netuid: sourceNetuid, targetNetuid, amount },
+              },
+            ]);
           }
         }
       }
     } else {
       const text = response.text();
       if (text) {
-        setMessages(prev => [...prev, { role: 'model', text }]);
+        setMessages((prev) => [...prev, { role: 'model', text }]);
       }
     }
   };
@@ -204,28 +279,42 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
     if (action.type === 'stake' && action.amount && chatSession) {
       const success = await executeStake(action.amount, action.netuid);
       if (success) {
-        setMessages(prev => [...prev, { role: 'user', text: `[System] Confirmed stake of ${action.amount} TAO.` }]);
+        setMessages((prev) => [...prev, { role: 'user', text: `[System] Stake confirmed for ${action.amount} TAO.` }]);
         setLoading(true);
-        const result = await chatSession.sendMessage(`The staking transaction of ${action.amount} TAO into netuid ${action.netuid} was successful! Confirm to the user.`);
+        const result = await chatSession.sendMessage(
+          `The staking transaction of ${action.amount} TAO into netuid ${action.netuid} succeeded. Confirm that to the user.`,
+        );
         await processResponse(result);
         setLoading(false);
       }
     } else if (action.type === 'unstake' && chatSession) {
       const success = await executeUnstake(action.netuid, action.amount);
       if (success) {
-        const textMsg = action.amount ? `Confirmed unstake of ${action.amount} Alpha from netuid ${action.netuid}.` : `Confirmed unstake from netuid ${action.netuid}.`;
-        setMessages(prev => [...prev, { role: 'user', text: `[System] ${textMsg}` }]);
+        const message = action.amount
+          ? `Unstake confirmed for ${action.amount} Alpha from netuid ${action.netuid}.`
+          : `Full unstake confirmed from netuid ${action.netuid}.`;
+        setMessages((prev) => [...prev, { role: 'user', text: `[System] ${message}` }]);
         setLoading(true);
-        const result = await chatSession.sendMessage(`The unstaking transaction from netuid ${action.netuid} was successful! Confirm to the user.`);
+        const result = await chatSession.sendMessage(
+          `The unstaking transaction from netuid ${action.netuid} succeeded. Confirm that to the user.`,
+        );
         await processResponse(result);
         setLoading(false);
       }
     } else if (action.type === 'swap' && action.targetNetuid !== undefined && action.amount && chatSession) {
       const success = await executeSwap(action.netuid, action.targetNetuid, action.amount);
       if (success) {
-        setMessages(prev => [...prev, { role: 'user', text: `[System] Confirmed Swap of ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid}.` }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'user',
+            text: `[System] Stake move confirmed for ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid}.`,
+          },
+        ]);
         setLoading(true);
-        const result = await chatSession.sendMessage(`The Swap transaction of ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid} was successful! Confirm to the user.`);
+        const result = await chatSession.sendMessage(
+          `The subnet rotation of ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid} succeeded. Confirm that to the user.`,
+        );
         await processResponse(result);
         setLoading(false);
       }
@@ -233,149 +322,206 @@ export default function ChatPortal({ account, balance, myAlphaBalance, allAlphaB
   };
 
   return (
-    <div className="glass-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
-      <div style={{ padding: '20px', borderBottom: '1px solid var(--border-subtle)', background: 'rgba(0,0,0,0.2)' }}>
-        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <img src="/logo-indigo.png" alt="Terabitt Logo" style={{ width: '22px', height: '22px', objectFit: 'contain' }} /> Terabitt AI Agent
-          {account && <span className="status-indicator"></span>}
-        </h3>
-      </div>
+    <div className="chat-wrap">
+      <div className="chat-head">
+        <div className="chat-head-l">
+          <div className="ch-title">TaoChat</div>
+          <div className="ch-sub">{account ? 'Bittensor EVM connected' : 'Bittensor EVM only · connect wallet'}</div>
+        </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {!account && (
-          <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-muted)', maxWidth: '440px', margin: '40px auto' }} className="glass-panel">
-            <ShieldAlert size={48} style={{ margin: '0 auto 16px', color: 'var(--accent-primary)', opacity: 0.8 }} />
-            <h3 style={{ color: 'var(--text-primary)', marginBottom: '8px', fontWeight: 700 }}>AI Agent Offline</h3>
-            <p style={{ marginBottom: '24px', fontSize: '13.5px', lineHeight: 1.6 }}>Please connect your preferred Web3 wallet to start interacting with the Terabitt AI Assistant.</p>
-            <button className="btn btn-primary" style={{ width: '100%', padding: '12px', fontSize: '14px', gap: '8px' }} onClick={openWalletSelector}>
-              Connect Wallet
+        {account ? (
+          <div className="wallet-inline-actions">
+            <div className="wpill" style={{ padding: '5px 10px' }}>
+              <div className="wdot" />
+              <span style={{ fontSize: '12px', color: 'var(--text-2)', fontFamily: 'monospace' }}>
+                {formatShortValue(account, 6, 4)}
+              </span>
+            </div>
+            <button type="button" className="tao-btn tao-btn--ghost tao-btn--small" onClick={disconnectWallet}>
+              Disconnect
             </button>
           </div>
+        ) : (
+          <button type="button" className="tao-btn tao-btn--primary tao-btn--small" onClick={openWalletSelector}>
+            <Wallet size={16} />
+            Connect wallet
+          </button>
         )}
+      </div>
 
-        {account && messages.map((msg, idx) => (
-          <div key={idx} style={{
-            display: 'flex',
-            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            gap: '12px',
-            marginBottom: '4px'
-          }}>
-             {msg.role === 'model' && (
-              <div style={{ flexShrink: 0, width: '36px', height: '36px', borderRadius: '50%', background: 'var(--accent-glow-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-highlight)', padding: '7px' }}>
-                <img src="/logo-indigo.png" alt="Terabitt Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-              </div>
-            )}
-            
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '75%' }}>
-              <div style={{
-                padding: '14px 18px',
-                borderRadius: '16px',
-                background: msg.role === 'user' ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))' : 'rgba(255, 255, 255, 0.05)',
-                border: msg.role === 'user' ? 'none' : '1px solid var(--border-subtle)',
-                borderBottomRightRadius: msg.role === 'user' ? '4px' : '16px',
-                borderBottomLeftRadius: msg.role === 'model' ? '4px' : '16px',
-                color: msg.role === 'user' ? '#ffffff' : 'var(--text-primary)',
-                lineHeight: 1.6,
-                fontSize: '14.5px',
-                boxShadow: msg.role === 'user' ? '0 4px 14px var(--accent-glow)' : 'none'
-              }} className="markdown-body">
-                <ReactMarkdown>{msg.text}</ReactMarkdown>
+      {!account && (
+        <div className="chat-inline-banner">
+          <ShieldAlert size={16} />
+          <span>Live today: Bittensor EVM staking, unstaking, and subnet rotation. External-chain deposits are coming soon.</span>
+        </div>
+      )}
+
+      <div className="chat-msgs">
+        {messages.map((message, index) => (
+          <div key={`${message.role}-${index}`} className={`msg ${message.role === 'user' ? 'user' : ''}`}>
+            <div className={`av ${message.role === 'user' ? 'av-u' : 'av-b'}`}>{message.role === 'user' ? 'U' : 'T'}</div>
+
+            <div className={`bub ${message.role === 'user' ? 'user' : 'bot'}`}>
+              <div className="chat-markdown">
+                <ReactMarkdown>{message.text}</ReactMarkdown>
               </div>
 
-              {msg.action && (
-                <div style={{ marginTop: '12px', width: '100%', minWidth: '280px' }} className="glass-panel">
-                  <div style={{ padding: '16px' }}>
-                    <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--text-primary)' }}>
-                      {msg.action.type === 'stake' ? 'Stake Confirmation' : msg.action.type === 'unstake' ? 'Unstake Confirmation' : 'Swap Confirmation'}
-                    </h4>
-                    {msg.action.type === 'stake' && (
-                      <div style={{ marginBottom: '16px', fontSize: '13px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                          <span className="text-muted">Amount</span>
-                          <span className="mono">{msg.action.amount} TAO</span>
+              {index === 0 && message.role === 'model' && (
+                <div className="suggestions">
+                  {QUICK_PROMPTS.map((prompt) => (
+                    <button key={prompt} type="button" className="sug" onClick={() => setInput(prompt)}>
+                      {prompt === 'Stake 100 TAO on the best subnet'
+                        ? 'Stake TAO'
+                        : prompt === 'Move half my Subnet 310 position to Subnet 19'
+                          ? 'Move subnet'
+                          : prompt === 'Unstake my Subnet 19 position'
+                            ? 'Unstake'
+                            : 'Research subnet'}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {message.action && (
+                <div className="tcard">
+                  <div className="tcard-head">
+                    <span className="tcard-head-ic">
+                      {message.action.type === 'stake' ? '↑' : message.action.type === 'unstake' ? '↓' : '⇄'}
+                    </span>
+                    <span className="tcard-head-t">
+                      {message.action.type === 'stake'
+                        ? 'Stake confirmation'
+                        : message.action.type === 'unstake'
+                          ? 'Unstake confirmation'
+                          : 'Subnet rotation'}
+                    </span>
+                  </div>
+
+                  <div className="tcard-body">
+                    {message.action.type === 'stake' && (
+                      <>
+                        <div className="trow">
+                          <span className="trow-k">Action</span>
+                          <span className="trow-v">Stake TAO</span>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span className="text-muted">Netuid</span>
-                          <span className="mono">{msg.action.netuid}</span>
+                        <div className="trow">
+                          <span className="trow-k">Amount</span>
+                          <span className="trow-v">{message.action.amount} TAO</span>
                         </div>
-                      </div>
+                        <div className="trow">
+                          <span className="trow-k">Subnet</span>
+                          <span className="trow-v trow-vo">Netuid {message.action.netuid}</span>
+                        </div>
+                      </>
                     )}
-                    {msg.action.type === 'unstake' && (
-                      <div style={{ marginBottom: '16px', fontSize: '13px' }}>
-                        {msg.action.amount && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                            <span className="text-muted">Amount</span>
-                            <span className="mono">{msg.action.amount} Alpha</span>
-                          </div>
-                        )}
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span className="text-muted">Netuid</span>
-                          <span className="mono">{msg.action.netuid}</span>
+
+                    {message.action.type === 'unstake' && (
+                      <>
+                        <div className="trow">
+                          <span className="trow-k">Action</span>
+                          <span className="trow-v">Unstake ALPHA</span>
                         </div>
-                      </div>
+                        <div className="trow">
+                          <span className="trow-k">Amount</span>
+                          <span className="trow-v">{message.action.amount ? `${message.action.amount} ALPHA` : 'All ALPHA'}</span>
+                        </div>
+                        <div className="trow">
+                          <span className="trow-k">From</span>
+                          <span className="trow-v trow-vo">Netuid {message.action.netuid}</span>
+                        </div>
+                      </>
                     )}
-                    {msg.action.type === 'swap' && (
-                      <div style={{ marginBottom: '16px', fontSize: '13px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                          <span className="text-muted">Amount</span>
-                          <span className="mono">{msg.action.amount} Alpha</span>
+
+                    {message.action.type === 'swap' && (
+                      <>
+                        <div className="trow">
+                          <span className="trow-k">Action</span>
+                          <span className="trow-v">Move ALPHA</span>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                          <span className="text-muted">From Netuid</span>
-                          <span className="mono">{msg.action.netuid}</span>
+                        <div className="trow">
+                          <span className="trow-k">Amount</span>
+                          <span className="trow-v">{message.action.amount} ALPHA</span>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span className="text-muted">To Netuid</span>
-                          <span className="mono">{msg.action.targetNetuid}</span>
+                        <div className="trow">
+                          <span className="trow-k">From</span>
+                          <span className="trow-v">Netuid {message.action.netuid}</span>
                         </div>
-                      </div>
+                        <div className="trow">
+                          <span className="trow-k">To</span>
+                          <span className="trow-v trow-vo">Netuid {message.action.targetNetuid}</span>
+                        </div>
+                      </>
                     )}
+                  </div>
+
+                  <div className="tcard-actions">
                     <button
-                      className="btn btn-primary"
-                      style={{ width: '100%', padding: '10px', fontSize: '13px' }}
-                      onClick={() => msg.action && handleAction(msg.action)}
-                      disabled={status.type === 'loading'}
+                      type="button"
+                      className="btn-confirm"
+                      onClick={() => message.action && handleAction(message.action)}
+                      disabled={!account || status.type === 'loading'}
                     >
-                      <ArrowRightLeft size={14} /> {msg.action.type === 'stake' ? 'Execute Stake' : msg.action.type === 'unstake' ? 'Execute Unstake' : 'Execute Swap'}
+                      {message.action.type === 'stake'
+                        ? 'Confirm & stake →'
+                        : message.action.type === 'unstake'
+                          ? 'Confirm & unstake →'
+                          : 'Confirm move →'}
+                    </button>
+                    <button type="button" className="btn-cancel" onClick={() => dismissAction(index)}>
+                      Cancel
                     </button>
                   </div>
                 </div>
               )}
             </div>
-
-            {msg.role === 'user' && (
-              <div style={{ flexShrink: 0, width: '36px', height: '36px', borderRadius: '50%', background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-subtle)' }}>
-                <User size={18} color="var(--text-secondary)" />
-              </div>
-            )}
           </div>
         ))}
+
         {loading && (
-          <div style={{ alignSelf: 'flex-start', display: 'flex', gap: '8px', alignItems: 'center', padding: '12px', color: 'var(--text-muted)' }}>
-            <Activity size={16} className="status-indicator" /> Thinking...
+          <div className="thinking-row">
+            <Activity size={16} />
+            Thinking through the route...
           </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
 
-      <div style={{ padding: '20px', borderTop: '1px solid var(--border-subtle)', background: 'rgba(0,0,0,0.2)' }}>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <input
-            type="text"
-            className="input-field"
-            placeholder={account ? "E.g., 'Stake 0.5 TAO to netuid 310' or 'Swap 1 Alpha from 310 to 311'" : "Connect wallet to chat..."}
+      <div className="chat-input-area">
+        <div className="input-hints">
+          {INPUT_HINTS.map((hint) => (
+            <button key={hint.label} type="button" className="hint" onClick={() => setInput(hint.prompt)}>
+              {hint.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="chat-input-row">
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            className="chat-textarea"
+            placeholder={!chatReady ? 'Add VITE_GEMINI_API_KEY to enable live chat...' : 'Ask TaoChat anything — stake, unstake, swap, research…'}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            disabled={!account || loading}
-            style={{ flex: 1 }}
+            onChange={(event) => {
+              setInput(event.target.value);
+              adjustTextareaHeight();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                handleSend();
+              }
+            }}
+            disabled={loading || !chatReady}
           />
           <button
-            className="btn btn-primary"
+            type="button"
+            className="send-btn"
             onClick={handleSend}
-            disabled={!account || loading || !input.trim()}
+            disabled={loading || !input.trim() || !chatReady}
           >
-            <Send size={18} />
+            <Send size={16} />
           </button>
         </div>
       </div>

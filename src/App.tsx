@@ -1,20 +1,37 @@
-import { useState, useEffect, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { ethers } from 'ethers';
 import { blake2b } from 'blakejs';
-import { Wallet, ArrowRightLeft, Activity, AlertCircle, History, LogOut } from 'lucide-react';
+import {
+  Activity,
+  AlertCircle,
+} from 'lucide-react';
 import { CONFIG } from './config';
 import abiData from './abi.json';
-import './index.css';
 import ChatPortal from './components/ChatPortal';
 
+interface EthereumProviderLike {
+  request: (args: { method: string; params?: unknown[] | Record<string, unknown>[] }) => Promise<unknown>;
+  on?: (event: string, listener: (...args: unknown[]) => void) => void;
+  removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
+}
+
 declare global {
-interface Window {
-    ethereum: any;
+  interface Window {
+    ethereum?: EthereumProviderLike;
+    talismanEth?: EthereumProviderLike;
   }
 }
 
 const CONTRACT_ABI = abiData;
+const EXPLORER_BASE_URL = 'https://evm-testnet.subtensor.io/tx/';
+
 type WalletType = 'metamask' | 'talisman';
+type Surface = 'landing' | 'app';
+type AppView = 'dashboard' | 'chat' | 'history';
+type StakingAction = 'stake' | 'swap' | 'unstake';
+type HistoryFilter = 'all' | 'stake' | 'unstake' | 'swap';
+type HistorySource = 'wallet' | 'contract';
+type StatusState = { type: 'idle' | 'loading' | 'success' | 'error'; msg: string };
 
 interface WalletOption {
   id: WalletType;
@@ -27,12 +44,40 @@ interface WalletOption {
   accentRgb: string;
 }
 
+interface StakeEvent {
+  type: 'stake' | 'unstake' | 'swap';
+  title: string;
+  detail: string;
+  amount: string;
+  user: string;
+  txHash: string;
+  blockNumber: number;
+  timestamp: number;
+}
+
+interface StakingPositionSummary {
+  netuid: number;
+  title: string;
+  badge: string;
+  hotkey: string;
+  amount: string;
+  apy: string;
+}
+
+interface SubnetPresentation {
+  netuid: number;
+  code: string;
+  name: string;
+  category: string;
+  apy: string;
+}
+
 const WALLET_OPTIONS: WalletOption[] = [
   {
     id: 'metamask',
     label: 'MetaMask',
     subtitle: 'EVM native',
-    description: 'A clean default for browser-based TAO staking on the Subnet EVM testnet.',
+    description: 'Recommended for the current Bittensor subEVM staking flow that is live today.',
     iconSrc: '/wallets/metamask-icon.svg',
     wordmarkSrc: '/wallets/metamask-wordmark.svg',
     accent: '#F6851B',
@@ -42,7 +87,7 @@ const WALLET_OPTIONS: WalletOption[] = [
     id: 'talisman',
     label: 'Talisman',
     subtitle: 'Bittensor friendly',
-    description: 'Best when you want one wallet flow that already feels native to the broader ecosystem.',
+    description: 'A strong fit when you want a wallet that already feels close to the broader Bittensor stack.',
     iconSrc: '/wallets/talisman-icon.svg',
     wordmarkSrc: '/wallets/talisman-wordmark.svg',
     accent: '#FF4D6D',
@@ -50,446 +95,757 @@ const WALLET_OPTIONS: WalletOption[] = [
   },
 ];
 
+const LANDING_TICKER = [
+  { label: 'SN19 Vision', value: '34.2% APY', delta: '↑ 2.1%', positive: true },
+  { label: 'SN27 Inference', value: '28.6% APY', delta: '↑ 0.8%', positive: true },
+  { label: 'SN11 Code', value: '22.3% APY', delta: '↑ 3.4%', positive: true },
+  { label: 'SN4 Multimodal', value: '19.1% APY', delta: '↓ 0.4%', positive: false },
+  { label: 'SN9 Translation', value: '16.4% APY', delta: '↑ 1.2%', positive: true },
+  { label: 'TAO/USD', value: '$487.20', delta: '↑ 4.1%', positive: true },
+  { label: 'SN1 Text', value: '14.8% APY', delta: '↓ 0.2%', positive: false },
+];
+
+const COMMAND_PREVIEWS = [
+  {
+    prompt: '"Stake 200 TAO on the top AI subnet this week"',
+    result: '200 TAO staked on SN27 at 28.6% APY · confirmed',
+  },
+  {
+    prompt: '"Move half my position from Subnet 310 into Subnet 19"',
+    result: 'Subnet rotation prepared on Bittensor EVM with source, target, and amount ready for review',
+  },
+  {
+    prompt: '"Unstake everything from Subnet 4 and move to Subnet 11"',
+    result: 'Unstake and follow-on restake flow prepared, with both steps shown before confirmation',
+  },
+  {
+    prompt: '"What does Subnet 27 do and how is it performing?"',
+    result: 'Full subnet breakdown shown · live APY, TVL, validator count',
+  },
+];
+
+const VISION_POINTS = [
+  {
+    icon: '⌘',
+    title: 'Intent to action',
+    description:
+      'You describe what you want. TaoChat interprets, shows you a full breakdown, and executes only after you confirm.',
+  },
+  {
+    icon: '⇄',
+    title: 'Cross-chain next',
+    description:
+      'SOL, ETH, and other external-chain routes are coming soon. The live build stays focused on native Bittensor EVM flows for now.',
+  },
+  {
+    icon: '◎',
+    title: 'Non-custodial always',
+    description:
+      'Every action signs from your own wallet. TaoChat never holds funds or keys.',
+  },
+];
+
+const USE_CASES = [
+  {
+    id: '01',
+    icon: '↑',
+    title: 'Stake on any subnet',
+    description:
+      'Pick by name, number, or ask for the best performer. Stake any amount of TAO or wALPHA directly from your wallet.',
+    example: 'Stake 50 TAO on Subnet 19',
+  },
+  {
+    id: '02',
+    icon: '↓',
+    title: 'Unstake anytime',
+    description:
+      'Exit fully or partially with one command. TaoChat handles the unbonding and returns your assets cleanly.',
+    example: 'Unstake half my Subnet 4 position',
+  },
+  {
+    id: '03',
+    icon: '⟳',
+    title: 'Cross-chain staking',
+    description:
+      'SOL, ETH, and external-chain deposit flows are planned, but they stay clearly marked as coming soon until they are fully live.',
+    example: 'Cross-chain routes are coming soon',
+  },
+  {
+    id: '04',
+    icon: '↗',
+    title: 'Discover top subnets',
+    description:
+      'Ask which subnets lead by APY, category, or momentum. Get live data and act on it instantly.',
+    example: 'Which AI subnet has the best APY?',
+  },
+  {
+    id: '05',
+    icon: '⇄',
+    title: 'Move between subnets',
+    description:
+      'Rotate a position in one command. Unstake from one, restake on another, both steps confirmed together.',
+    example: 'Move my SN4 stake to Subnet 27',
+  },
+  {
+    id: '06',
+    icon: '⬡',
+    title: 'Research any subnet',
+    description:
+      'Ask what a subnet does, its live APY, TVL, validator count, and how it compares to similar ones.',
+    example: 'What does Subnet 11 do?',
+  },
+];
+
+const SUPPORTED_NETWORKS = [
+  { name: 'Solana', symbol: '◎', status: 'Coming soon', style: { background: '#9945FF', color: '#fff' } },
+  { name: 'Ethereum', symbol: '⟠', status: 'Coming soon', style: { background: '#627EEA', color: '#fff' } },
+  { name: 'Bittensor EVM', symbol: 'τ', status: 'Live', style: { background: '#E8622A', color: '#fff' } },
+  { name: 'BNB Chain', symbol: '⬡', status: 'Coming soon' },
+];
+
+const DISPLAY_SUBNETS = [
+  { netuid: 310, code: 'SN310', name: 'Alpha', category: 'Bittensor EVM route', apy: '18.4%' },
+  { netuid: 19, code: 'SN19', name: 'Vision', category: 'Image AI', apy: '34.2%' },
+  { netuid: 27, code: 'SN27', name: 'Inference', category: 'LLM serving', apy: '28.6%' },
+  { netuid: 11, code: 'SN11', name: 'Code', category: 'Code generation', apy: '22.3%' },
+  { netuid: 4, code: 'SN4', name: 'Multimodal', category: 'Vision + language', apy: '19.1%' },
+];
+
+const CONTRACT_DEPLOY_BLOCK = 7147534;
+const INTENT_FILLED_TOPIC = ethers.id('IntentFilled(address,address,uint256)');
+const contractInterface = new ethers.Interface(CONTRACT_ABI);
+const stakingCallInterface = new ethers.Interface([
+  'function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external',
+  'function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external',
+  'function removeStakeFull(bytes32 hotkey, uint256 netuid) external',
+]);
+
 // Single persistent JsonRpcProvider for all read-only calls
 const directProvider = new ethers.JsonRpcProvider(CONFIG.NETWORK.rpcUrls[0], undefined, {
-  staticNetwork: true
+  staticNetwork: true,
 });
 
 const stakingPrecompile = new ethers.Contract(
-  "0x0000000000000000000000000000000000000805",
+  '0x0000000000000000000000000000000000000805',
   [
-    "function getTotalAlphaStaked(bytes32 hotkey, uint256 netuid) external view returns (uint256)",
-    "function getStake(bytes32 hotkey, bytes32 coldkey, uint256 netuid) external view returns (uint256)"
+    'function getTotalAlphaStaked(bytes32 hotkey, uint256 netuid) external view returns (uint256)',
+    'function getStake(bytes32 hotkey, bytes32 coldkey, uint256 netuid) external view returns (uint256)',
   ],
-  directProvider
+  directProvider,
 );
 
+const getEpochMs = () => Date.now();
 
-interface StakeEvent {
-  type: 'stake' | 'unstake';
-  taoAmount: string;
-  alphaAmount: string;
-  netuid: number;
-  txHash: string;
-  blockNumber: number;
+const getIntentTiming = () => {
+  const now = getEpochMs();
+  return {
+    deadline: Math.floor(now / 1000) + 3600,
+    nonce: now,
+  };
+};
+
+const getInjectedProvider = (wallet?: WalletType | null): EthereumProviderLike | undefined =>
+  wallet === 'talisman' ? window.talismanEth || window.ethereum : window.ethereum;
+
+const formatShortValue = (value: string, start = 8, end = 6) => {
+  if (!value) return '';
+  return `${value.slice(0, start)}...${value.slice(-end)}`;
+};
+
+const formatTokenAmount = (value: string, digits = 4) => {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return value;
+  return parsed.toFixed(digits).replace(/\.?0+$/, '');
+};
+
+const formatHistoryTime = (timestamp: number) => {
+  const date = new Date(timestamp);
+  return `${date.toLocaleString([], { month: 'short', day: 'numeric' })} · ${date.toLocaleString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  })}`;
+};
+
+const getSubnetMeta = (targetNetuid: number) =>
+  DISPLAY_SUBNETS.find((subnet) => subnet.netuid === targetNetuid) ?? null;
+
+const getMockApyForNetuid = (targetNetuid: number) => {
+  const subnetMeta = getSubnetMeta(targetNetuid);
+  if (subnetMeta?.apy) return subnetMeta.apy;
+
+  const baseApy = 14 + ((targetNetuid * 7) % 13);
+  const fractional = ((targetNetuid * 3) % 10) / 10;
+  return `${(baseApy + fractional).toFixed(1)}%`;
+};
+
+const getSubnetPresentation = (targetNetuid: number): SubnetPresentation => {
+  const subnetMeta = getSubnetMeta(targetNetuid);
+  if (subnetMeta) return subnetMeta;
+
+  if (targetNetuid === 0) {
+    return {
+      netuid: 0,
+      code: 'SN0',
+      name: 'Root Network',
+      category: 'Bittensor root route',
+      apy: getMockApyForNetuid(targetNetuid),
+    };
+  }
+
+  if (targetNetuid === 1) {
+    return {
+      netuid: 1,
+      code: 'SN1',
+      name: 'Text',
+      category: 'Text subnet',
+      apy: getMockApyForNetuid(targetNetuid),
+    };
+  }
+
+  return {
+    netuid: targetNetuid,
+    code: `SN${targetNetuid}`,
+    name: `Subnet ${targetNetuid}`,
+    category: 'Bittensor route',
+    apy: getMockApyForNetuid(targetNetuid),
+  };
+};
+
+const getSubnetLabel = (targetNetuid: number) => {
+  const subnetMeta = getSubnetPresentation(targetNetuid);
+  return `${subnetMeta.code} — ${subnetMeta.name}`;
+};
+
+const normalizeAddress = (value: string) => {
+  try {
+    return ethers.getAddress(value);
+  } catch {
+    return value.toLowerCase();
+  }
+};
+
+const isSameAddress = (left: string, right: string) => normalizeAddress(left) === normalizeAddress(right);
+
+const decodeIndexedAddress = (topic?: string) => {
+  if (!topic || topic.length < 42) return '';
+  return ethers.getAddress(`0x${topic.slice(-40)}`);
+};
+
+const getHotkeyForNetuid = (targetNetuid: number): string => {
+  if (targetNetuid === 310) {
+    return '0x3cba5f549c02a4da782cadb65564d0e8159f339f5610db4bd5773f36c760f97c';
+  }
+
+  return '0x1e738b33dfbd68eaba7db3f03fe942cfa4e32b728e52c26743b16dbca15af464';
+};
+
+interface IntentCall {
+  target: string;
+  value: bigint;
+  callData: string;
 }
+
+interface IntentCondition {
+  asset: number;
+  minOutput: bigint;
+  hotkey: string;
+  netuid: number;
+}
+
+const mergeHistoryEvents = (...historyGroups: StakeEvent[][]) => {
+  const merged = new Map<string, StakeEvent>();
+
+  for (const group of historyGroups) {
+    for (const event of group) {
+      const key = `${event.txHash}:${event.type}:${event.detail}`;
+      if (!merged.has(key)) {
+        merged.set(key, event);
+      }
+    }
+  }
+
+  return Array.from(merged.values()).sort(
+    (left, right) => right.timestamp - left.timestamp || right.blockNumber - left.blockNumber,
+  );
+};
 
 function App() {
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
   const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null);
-  const [account, setAccount] = useState<string>('');
-  const [balance, setBalance] = useState<string>('0');
-  const [myAlphaBalance, setMyAlphaBalance] = useState<string>('0');
-  const [totalAlphaStaked, setTotalAlphaStaked] = useState<string>('0');
+  const [account, setAccount] = useState('');
+  const [balance, setBalance] = useState('0');
+  const [myAlphaBalance, setMyAlphaBalance] = useState('0');
+  const [totalAlphaStaked, setTotalAlphaStaked] = useState('0');
   const [allAlphaBalances, setAllAlphaBalances] = useState<{ [id: number]: string }>({});
   const [stakedHotkeys, setStakedHotkeys] = useState<{ [netuid: number]: string }>({});
   const [stakeHistory, setStakeHistory] = useState<StakeEvent[]>([]);
+  const [sessionStakeHistory, setSessionStakeHistory] = useState<StakeEvent[]>([]);
   const [walletType, setWalletType] = useState<WalletType | null>(null);
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [isWalletHydrating, setIsWalletHydrating] = useState(false);
 
-  const decodeDelegations = (scaleBytes: any): { netuid: number; stake: number; hotkey: string }[] => {
+  const [stakeAmount, setStakeAmount] = useState('');
+  const [unstakeAmount, setUnstakeAmount] = useState('');
+  const [netuid, setNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
+  const [unstakeNetuid, setUnstakeNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
+  const [swapAmount, setSwapAmount] = useState('');
+  const [swapSourceNetuid, setSwapSourceNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
+  const [swapTargetNetuid, setSwapTargetNetuid] = useState<number>(19);
+
+  const [surface, setSurface] = useState<Surface>('landing');
+  const [appView, setAppView] = useState<AppView>('dashboard');
+  const [stakingAction, setStakingAction] = useState<StakingAction>('stake');
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
+  const [historySource, setHistorySource] = useState<HistorySource>('contract');
+  const [status, setStatus] = useState<StatusState>({ type: 'idle', msg: '' });
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+
+  const decodeDelegations = (scaleBytes: unknown): { netuid: number; stake: number; hotkey: string }[] => {
     if (!scaleBytes) return [];
+
     let bytes: Uint8Array;
     if (typeof scaleBytes === 'string') {
       const hex = scaleBytes.replace('0x', '');
       const arr = new Uint8Array(hex.length / 2);
       for (let i = 0; i < hex.length; i += 2) {
-        arr[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+        arr[i / 2] = Number.parseInt(hex.substring(i, i + 2), 16);
       }
       bytes = arr;
     } else if (Array.isArray(scaleBytes)) {
       bytes = new Uint8Array(scaleBytes);
+    } else if (scaleBytes instanceof Uint8Array) {
+      bytes = scaleBytes;
     } else {
-      bytes = new Uint8Array(scaleBytes as any);
+      return [];
     }
 
     const offset = { value: 0 };
 
-    const readCompact = (bytes: Uint8Array, offset: { value: number }): bigint => {
-      const first = bytes[offset.value++];
+    const readCompact = (compactBytes: Uint8Array, cursor: { value: number }): bigint => {
+      const first = compactBytes[cursor.value++];
       const mode = first & 0x03;
+
       if (mode === 0) {
         return BigInt(first >> 2);
-      } else if (mode === 1) {
-        const second = bytes[offset.value++];
+      }
+
+      if (mode === 1) {
+        const second = compactBytes[cursor.value++];
         return BigInt((first >> 2) | (second << 6));
-      } else if (mode === 2) {
-        const b1 = bytes[offset.value++];
-        const b2 = bytes[offset.value++];
-        const b3 = bytes[offset.value++];
+      }
+
+      if (mode === 2) {
+        const b1 = compactBytes[cursor.value++];
+        const b2 = compactBytes[cursor.value++];
+        const b3 = compactBytes[cursor.value++];
         const val = (first >> 2) | (b1 << 6) | (b2 << 14) | (b3 << 22);
         return BigInt(val >>> 0);
-      } else {
-        const len = (first >> 2) + 4;
-        let val = 0n;
-        for (let i = 0; i < len; i++) {
-          val |= BigInt(bytes[offset.value++]) << BigInt(i * 8);
-        }
-        return val;
       }
+
+      const len = (first >> 2) + 4;
+      let val = 0n;
+      for (let i = 0; i < len; i += 1) {
+        val |= BigInt(compactBytes[cursor.value++]) << BigInt(i * 8);
+      }
+      return val;
     };
 
-    const bytesToHex = (bytes: Uint8Array): string => {
-      return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-    };
+    const bytesToHex = (hexBytes: Uint8Array) =>
+      `0x${Array.from(hexBytes)
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('')}`;
 
     try {
       const len = Number(readCompact(bytes, offset));
       const results: { netuid: number; stake: number; hotkey: string }[] = [];
 
-      for (let k = 0; k < len; k++) {
-        // 1. delegate_ss58: 32 bytes
+      for (let index = 0; index < len; index += 1) {
         const delegateHotkey = bytesToHex(bytes.slice(offset.value, offset.value + 32));
         offset.value += 32;
 
-        // 2. take: Compact<u16>
         readCompact(bytes, offset);
 
-        // 3. nominators: Vec
         const nominatorsLen = Number(readCompact(bytes, offset));
-        for (let i = 0; i < nominatorsLen; i++) {
-          offset.value += 32; // nominator AccountId
+        for (let i = 0; i < nominatorsLen; i += 1) {
+          offset.value += 32;
           const nominatorStakesLen = Number(readCompact(bytes, offset));
-          for (let j = 0; j < nominatorStakesLen; j++) {
-            readCompact(bytes, offset); // netuid
-            readCompact(bytes, offset); // stake amount
+          for (let j = 0; j < nominatorStakesLen; j += 1) {
+            readCompact(bytes, offset);
+            readCompact(bytes, offset);
           }
         }
 
-        // 4. owner_ss58: 32 bytes
         offset.value += 32;
 
-        // 5. registrations: Vec<Compact<NetUid>>
-        const regsLen = Number(readCompact(bytes, offset));
-        for (let i = 0; i < regsLen; i++) {
+        const registrationsLen = Number(readCompact(bytes, offset));
+        for (let i = 0; i < registrationsLen; i += 1) {
           readCompact(bytes, offset);
         }
 
-        // 6. validator_permits: Vec<Compact<NetUid>>
         const permitsLen = Number(readCompact(bytes, offset));
-        for (let i = 0; i < permitsLen; i++) {
+        for (let i = 0; i < permitsLen; i += 1) {
           readCompact(bytes, offset);
         }
 
-        // 7. return_per_1000: Compact<u64>
+        readCompact(bytes, offset);
         readCompact(bytes, offset);
 
-        // 8. total_daily_return: Compact<u64>
-        readCompact(bytes, offset);
-
-        // 9. netuid: Compact<NetUid>
-        const netuid = Number(readCompact(bytes, offset));
-
-        // 10. stake: Compact<AlphaBalance>
+        const decodedNetuid = Number(readCompact(bytes, offset));
         const stakeRaw = readCompact(bytes, offset);
-        const stake = Number(stakeRaw) / 1e9;
+        const decodedStake = Number(stakeRaw) / 1e9;
 
         results.push({
-          netuid,
-          stake,
-          hotkey: delegateHotkey
+          netuid: decodedNetuid,
+          stake: decodedStake,
+          hotkey: delegateHotkey,
         });
       }
+
       return results;
-    } catch (e) {
-      console.error('Failed to decode scale bytes:', e);
+    } catch (error) {
+      console.error('Failed to decode scale bytes:', error);
       return [];
     }
   };
-
-
-  const [stakeAmount, setStakeAmount] = useState<string>('');
-  const [unstakeAmount, setUnstakeAmount] = useState<string>('');
-  const [netuid, setNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
-  const [unstakeNetuid, setUnstakeNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
-  const [swapAmount, setSwapAmount] = useState<string>('');
-  const [swapSourceNetuid, setSwapSourceNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
-  const [swapTargetNetuid, setSwapTargetNetuid] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<'staking' | 'chat'>('staking');
-  const [stakingAction, setStakingAction] = useState<'stake' | 'swap' | 'unstake'>('stake');
-
-  const [status, setStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error', msg: string }>({ type: 'idle', msg: '' });
-
-  /*
-  const fetchStakeHistory = async (prov: ethers.Provider, userAddress: string) => {
-    try {
-      const contract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, prov);
-      
-      const currentBlock = await prov.getBlockNumber();
-      // Look back 100,000 blocks to scan all recent intents
-      const fromBlock = Math.max(0, currentBlock - 100000);
-      
-      const intentFilter = contract.filters.IntentFilled(userAddress);
-      const intentEvents = await contract.queryFilter(intentFilter, fromBlock, 'latest');
-      
-      const history: StakeEvent[] = [];
-      
-      const contractInterface = new ethers.Interface(CONTRACT_ABI);
-      const stakingInterface = new ethers.Interface([
-        "function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
-        "function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
-        "function removeStakeFull(bytes32 hotkey, uint256 netuid) external"
-      ]);
-
-      for (const ev of intentEvents) {
-        try {
-          const log = ev as ethers.EventLog;
-          const txHash = log.transactionHash;
-          const tx = await prov.getTransaction(txHash);
-          if (!tx || !tx.data) continue;
-
-          // Parse transaction input data
-          const decoded = contractInterface.parseTransaction({ data: tx.data, value: tx.value });
-          if (!decoded || decoded.name !== 'fillIntent') continue;
-
-          const intent = decoded.args[0]; // Struct Intent is the first arg
-          const calls = intent.calls;
-
-          // Inspect the nested calls for staking interactions
-          for (const call of calls) {
-            if (call.target.toLowerCase() === "0x0000000000000000000000000000000000000805") {
-              const selector = call.callData.substring(0, 10);
-              
-              if (selector === stakingInterface.getFunction("addStake")?.selector) {
-                const parsedCall = stakingInterface.decodeFunctionData("addStake", call.callData);
-                const amountRao = parsedCall[1];
-                const evNetuid = Number(parsedCall[2]);
-                history.push({
-                  type: 'stake',
-                  taoAmount: (Number(amountRao * 1000000000n) / 1e18).toFixed(4),
-                  alphaAmount: (Number(amountRao) / 1e9).toFixed(4),
-                  netuid: evNetuid,
-                  txHash: txHash,
-                  blockNumber: log.blockNumber,
-                });
-              } 
-              else if (selector === stakingInterface.getFunction("removeStake")?.selector) {
-                const parsedCall = stakingInterface.decodeFunctionData("removeStake", call.callData);
-                const amountRao = parsedCall[1];
-                const evNetuid = Number(parsedCall[2]);
-                history.push({
-                  type: 'unstake',
-                  taoAmount: (Number(amountRao * 1000000000n) / 1e18).toFixed(4),
-                  alphaAmount: (Number(amountRao) / 1e9).toFixed(4),
-                  netuid: evNetuid,
-                  txHash: txHash,
-                  blockNumber: log.blockNumber,
-                });
-              }
-              else if (selector === stakingInterface.getFunction("removeStakeFull")?.selector) {
-                const parsedCall = stakingInterface.decodeFunctionData("removeStakeFull", call.callData);
-                const evNetuid = Number(parsedCall[1]);
-                history.push({
-                  type: 'unstake',
-                  taoAmount: 'ALL',
-                  alphaAmount: 'ALL',
-                  netuid: evNetuid,
-                  txHash: txHash,
-                  blockNumber: log.blockNumber,
-                });
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Failed to parse intent history item:", err);
-        }
-      }
-
-      history.sort((a, b) => b.blockNumber - a.blockNumber);
-      setStakeHistory(history);
-    } catch (e) {
-      console.error('Failed to fetch stake history:', e);
-    }
-  };
-  */
 
   const fetchStats = async (prov: ethers.BrowserProvider, address: string) => {
     try {
       const bal = await prov.getBalance(address);
       setBalance(ethers.formatEther(bal));
 
-      // 1. Calculate coldkeys using blake2b
-      // Contract Coldkey
       const evmHex = CONFIG.CONTRACT_ADDRESS.replace('0x', '');
       const evmAddrBytes = new Uint8Array(evmHex.length / 2);
       for (let i = 0; i < evmHex.length; i += 2) {
-        evmAddrBytes[i / 2] = parseInt(evmHex.substring(i, i + 2), 16);
+        evmAddrBytes[i / 2] = Number.parseInt(evmHex.substring(i, i + 2), 16);
       }
+
       const prefix = new TextEncoder().encode('evm:');
       const contractInput = new Uint8Array(prefix.length + evmAddrBytes.length);
       contractInput.set(prefix);
       contractInput.set(evmAddrBytes, prefix.length);
       const contractHashBytes = blake2b(contractInput, undefined, 32);
-      const contractColdkey = '0x' + Array.from(contractHashBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      const contractColdkey = `0x${Array.from(contractHashBytes)
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('')}`;
 
-      // Wallet Coldkey
       const walletHex = address.replace('0x', '');
       const walletAddrBytes = new Uint8Array(walletHex.length / 2);
       for (let i = 0; i < walletHex.length; i += 2) {
-        walletAddrBytes[i / 2] = parseInt(walletHex.substring(i, i + 2), 16);
+        walletAddrBytes[i / 2] = Number.parseInt(walletHex.substring(i, i + 2), 16);
       }
+
       const walletInput = new Uint8Array(prefix.length + walletAddrBytes.length);
       walletInput.set(prefix);
       walletInput.set(walletAddrBytes, prefix.length);
       const walletHashBytes = blake2b(walletInput, undefined, 32);
-      const walletColdkey = '0x' + Array.from(walletHashBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      const walletColdkey = `0x${Array.from(walletHashBytes)
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('')}`;
 
-      // 2. Fetch total alpha staked for the selected hotkey/netuid
       const hotkey = stakedHotkeys[netuid] || getHotkeyForNetuid(netuid);
+
       try {
         const alpha = await stakingPrecompile.getTotalAlphaStaked(hotkey, netuid);
         setTotalAlphaStaked((Number(alpha) / 1e9).toString());
-      } catch (e) {
-        console.error('getTotalAlphaStaked failed:', e);
+      } catch (error) {
+        console.error('getTotalAlphaStaked failed:', error);
         setTotalAlphaStaked('0');
       }
 
-      // 3. Fetch specific getStake balance for contract on currently selected netuid
       try {
         const myStake = await stakingPrecompile.getStake(hotkey, contractColdkey, netuid);
         setMyAlphaBalance((Number(myStake) / 1e9).toString());
-      } catch (e) {
-        console.error('getStake failed:', e);
+      } catch (error) {
+        console.error('getStake failed:', error);
         setMyAlphaBalance('0');
       }
 
-      // 4. Fetch all active delegation positions using delegateInfo_getDelegated RPC for contract and wallet!
       const balances: { [id: number]: string } = {};
       const hotkeysMap: { [id: number]: string } = {};
 
       const hexToBytes = (hex: string) => {
         const clean = hex.replace('0x', '');
-        const bytes = [];
+        const bytes: number[] = [];
         for (let i = 0; i < clean.length; i += 2) {
-          bytes.push(parseInt(clean.substring(i, i + 2), 16));
+          bytes.push(Number.parseInt(clean.substring(i, i + 2), 16));
         }
         return bytes;
       };
 
       try {
         const [contractScaleBytes, walletScaleBytes] = await Promise.all([
-          directProvider.send("delegateInfo_getDelegated", [hexToBytes(contractColdkey)]),
-          directProvider.send("delegateInfo_getDelegated", [hexToBytes(walletColdkey)]).catch(() => [])
+          directProvider.send('delegateInfo_getDelegated', [hexToBytes(contractColdkey)]),
+          directProvider.send('delegateInfo_getDelegated', [hexToBytes(walletColdkey)]).catch(() => []),
         ]);
 
         const contractPositions = decodeDelegations(contractScaleBytes);
         const walletPositions = decodeDelegations(walletScaleBytes);
 
-        // Merge contract positions
-        for (const pos of contractPositions) {
-          if (pos.stake > 0) {
-            balances[pos.netuid] = pos.stake.toString();
-            hotkeysMap[pos.netuid] = pos.hotkey;
+        for (const position of contractPositions) {
+          if (position.stake > 0) {
+            balances[position.netuid] = position.stake.toString();
+            hotkeysMap[position.netuid] = position.hotkey;
           }
         }
 
-        // Merge wallet positions
-        for (const pos of walletPositions) {
-          if (pos.stake > 0) {
-            const existingStake = balances[pos.netuid] ? parseFloat(balances[pos.netuid]) : 0;
-            balances[pos.netuid] = (existingStake + pos.stake).toString();
-            if (!hotkeysMap[pos.netuid]) {
-              hotkeysMap[pos.netuid] = pos.hotkey;
+        for (const position of walletPositions) {
+          if (position.stake > 0) {
+            const existingStake = balances[position.netuid] ? Number.parseFloat(balances[position.netuid]) : 0;
+            balances[position.netuid] = (existingStake + position.stake).toString();
+            if (!hotkeysMap[position.netuid]) {
+              hotkeysMap[position.netuid] = position.hotkey;
             }
           }
         }
-      } catch (err) {
-        console.error("Failed to fetch/decode active delegation positions:", err);
+      } catch (error) {
+        console.error('Failed to fetch/decode active delegation positions:', error);
       }
 
-      // 5. Ensure the currently selected netuid is always in the balances map
       if (balances[netuid] === undefined) {
         balances[netuid] = '0';
       }
-      
+
       setAllAlphaBalances(balances);
       setStakedHotkeys(hotkeysMap);
-
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      console.error(error);
     }
   };
 
-  // Auto-refresh when netuid, account, or provider changes, with debouncing for netuid/keystrokes
-  useEffect(() => {
-    if (!provider || !account) return;
+  const fetchOnchainHistory = async (address?: string) => {
+    setIsHistoryLoading(true);
 
-    const timer = setTimeout(() => {
+    try {
+      const targetAddress = address ? normalizeAddress(address) : '';
+      const blockCache = new Map<number, Promise<ethers.Block | null>>();
+      const getBlock = (blockNumber: number) => {
+        let existing = blockCache.get(blockNumber);
+        if (!existing) {
+          existing = directProvider.getBlock(blockNumber);
+          blockCache.set(blockNumber, existing);
+        }
+        return existing;
+      };
+
+      const logs = await directProvider.getLogs({
+        address: CONFIG.CONTRACT_ADDRESS,
+        topics: [INTENT_FILLED_TOPIC],
+        fromBlock: CONTRACT_DEPLOY_BLOCK,
+        toBlock: 'latest',
+      });
+
+      const history = await Promise.all(
+        logs.map(async (log): Promise<StakeEvent | null> => {
+          try {
+            const tx = await directProvider.getTransaction(log.transactionHash);
+            if (!tx?.data) return null;
+
+            const parsedTransaction = contractInterface.parseTransaction({ data: tx.data, value: tx.value });
+            if (!parsedTransaction || parsedTransaction.name !== 'fillIntent') return null;
+
+            const intent = parsedTransaction.args[0] as {
+              calls: Array<{ callData: string }>;
+            };
+            const decodedCalls = intent.calls
+              .map((call) => {
+                try {
+                  return stakingCallInterface.parseTransaction({ data: call.callData });
+                } catch (error) {
+                  console.error('Failed to decode staking call from fillIntent:', error);
+                  return null;
+                }
+              })
+              .filter((call): call is NonNullable<typeof call> => Boolean(call));
+
+            if (decodedCalls.length === 0) return null;
+
+            const firstCall = decodedCalls[0];
+            const secondCall = decodedCalls[1] ?? null;
+            const block = await getBlock(log.blockNumber);
+            const timestamp = Number(block?.timestamp ?? Math.floor(Date.now() / 1000)) * 1000;
+            const user = decodeIndexedAddress(log.topics[1]);
+
+            if (decodedCalls.some((call) => call.name === 'addStake') && !decodedCalls.some((call) => call.name.startsWith('removeStake'))) {
+              const [hotkey, amountRao, targetNetuid] = firstCall.args as unknown as [string, bigint, bigint];
+              const stakeAmount = tx.value > 0n ? ethers.formatEther(tx.value) : ethers.formatUnits(amountRao, 9);
+              return {
+                type: 'stake',
+                title: 'Stake TAO',
+                detail: `${getSubnetLabel(Number(targetNetuid))} • Hotkey ${formatShortValue(hotkey, 8, 6)}`,
+                amount: `${formatTokenAmount(stakeAmount)} TAO`,
+                user,
+                txHash: log.transactionHash,
+                blockNumber: log.blockNumber,
+                timestamp,
+              };
+            }
+
+            if (decodedCalls.some((call) => call.name.startsWith('removeStake')) && decodedCalls.some((call) => call.name === 'addStake') && secondCall) {
+              const [, sourceAmountRao, sourceNetuid] =
+                firstCall.name === 'removeStake'
+                  ? (firstCall.args as unknown as [string, bigint, bigint])
+                  : ([firstCall.args[0], 0n, firstCall.args[1]] as [string, bigint, bigint]);
+              const [, , targetNetuid] = secondCall.args as unknown as [string, bigint, bigint];
+
+              return {
+                type: 'swap',
+                title: 'Move stake',
+                detail: `${getSubnetLabel(Number(sourceNetuid))} → ${getSubnetLabel(Number(targetNetuid))}`,
+                amount:
+                  firstCall.name === 'removeStake'
+                    ? `${formatTokenAmount(ethers.formatUnits(sourceAmountRao, 9))} ALPHA`
+                    : 'All ALPHA',
+                user,
+                txHash: log.transactionHash,
+                blockNumber: log.blockNumber,
+                timestamp,
+              };
+            }
+
+            if (decodedCalls.some((call) => call.name.startsWith('removeStake'))) {
+              if (firstCall.name === 'removeStake') {
+                const [hotkey, amountRao, targetNetuid] = firstCall.args as unknown as [string, bigint, bigint];
+                return {
+                  type: 'unstake',
+                  title: 'Unstake Alpha',
+                  detail: `${getSubnetLabel(Number(targetNetuid))} • Hotkey ${formatShortValue(hotkey, 8, 6)}`,
+                  amount: `${formatTokenAmount(ethers.formatUnits(amountRao, 9))} ALPHA`,
+                  user,
+                  txHash: log.transactionHash,
+                  blockNumber: log.blockNumber,
+                  timestamp,
+                };
+              }
+
+              if (firstCall.name === 'removeStakeFull') {
+                const [hotkey, targetNetuid] = firstCall.args as unknown as [string, bigint];
+                return {
+                  type: 'unstake',
+                  title: 'Unstake Alpha',
+                  detail: `${getSubnetLabel(Number(targetNetuid))} • Hotkey ${formatShortValue(hotkey, 8, 6)}`,
+                  amount: 'All ALPHA',
+                  user,
+                  txHash: log.transactionHash,
+                  blockNumber: log.blockNumber,
+                  timestamp,
+                };
+              }
+            }
+
+            return null;
+          } catch (error) {
+            console.error('Failed to reconstruct on-chain history entry:', error);
+            return null;
+          }
+        }),
+      );
+
+      const reconstructedHistory = history
+        .filter((event): event is StakeEvent => Boolean(event))
+        .sort((left, right) => right.timestamp - left.timestamp || right.blockNumber - left.blockNumber);
+
+      const walletHistory = targetAddress
+        ? reconstructedHistory.filter((event) => event.user && isSameAddress(event.user, targetAddress))
+        : [];
+      const nextHistory = walletHistory.length > 0 ? walletHistory : reconstructedHistory;
+
+      setHistorySource(walletHistory.length > 0 ? 'wallet' : 'contract');
+      setStakeHistory(nextHistory);
+    } catch (error) {
+      console.error('Failed to fetch contract-backed history:', error);
+      setHistorySource('contract');
+      setStakeHistory([]);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!provider || !account) return undefined;
+
+    const timer = window.setTimeout(() => {
       if (typeof netuid === 'number' && netuid >= 0) {
         fetchStats(provider, account);
       }
-    }, 500); // 500ms debounce
+    }, 500);
 
-    return () => clearTimeout(timer);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [netuid, account, provider]);
 
   const clearWalletState = () => {
     setIsWalletHydrating(false);
+    setIsHistoryLoading(false);
     setAccount('');
     setSigner(null);
     setProvider(null);
     setStatus({ type: 'idle', msg: '' });
     setBalance('0');
+    setHistorySource('contract');
     setTotalAlphaStaked('0');
     setMyAlphaBalance('0');
     setStakeHistory([]);
+    setSessionStakeHistory([]);
     setAllAlphaBalances({});
     setStakedHotkeys({});
     setWalletType(null);
+    setShowWalletModal(false);
     localStorage.removeItem('connected_wallet');
+    void fetchOnchainHistory();
   };
 
   const disconnectWallet = async () => {
-    const selectedWallet = walletType || localStorage.getItem('connected_wallet');
+    const selectedWallet = walletType || (localStorage.getItem('connected_wallet') as WalletType | null);
     clearWalletState();
+
     try {
-      let ethereumProvider: any = null;
-      if (selectedWallet === 'talisman') {
-        ethereumProvider = (window as any).talismanEth || (window as any).ethereum;
-      } else {
-        ethereumProvider = (window as any).ethereum;
-      }
-      if (ethereumProvider && ethereumProvider.request) {
+      const ethereumProvider = getInjectedProvider(selectedWallet);
+
+      if (ethereumProvider) {
         await ethereumProvider.request({
-          method: "wallet_revokePermissions",
-          params: [{ eth_accounts: {} }]
+          method: 'wallet_revokePermissions',
+          params: [{ eth_accounts: {} }],
         });
       }
     } catch (error) {
-      console.error("Failed to revoke permissions:", error);
+      console.error('Failed to revoke permissions:', error);
     }
   };
 
   const connectWallet = async (wallet?: WalletType) => {
     const selectedWallet = wallet || (localStorage.getItem('connected_wallet') as WalletType) || 'metamask';
-    let ethereumProvider: any = null;
-    if (selectedWallet === 'talisman') {
-      ethereumProvider = (window as any).talismanEth || (window as any).ethereum;
-    } else {
-      ethereumProvider = (window as any).ethereum;
-    }
+    const ethereumProvider = getInjectedProvider(selectedWallet);
 
     if (!ethereumProvider) {
       setIsWalletHydrating(false);
       setStatus({ type: 'error', msg: `${selectedWallet === 'talisman' ? 'Talisman' : 'MetaMask'} not installed` });
       return;
     }
+
     try {
       setIsWalletHydrating(true);
-      setStatus({ type: 'loading', msg: `Connecting to ${selectedWallet === 'talisman' ? 'Talisman' : 'MetaMask'}...` });
-      const prov = new ethers.BrowserProvider(ethereumProvider);
+      setStatus({
+        type: 'loading',
+        msg: `Connecting to ${selectedWallet === 'talisman' ? 'Talisman' : 'MetaMask'}...`,
+      });
 
+      const prov = new ethers.BrowserProvider(ethereumProvider as ethers.Eip1193Provider);
       const network = await prov.getNetwork();
+
       if (network.chainId !== BigInt(CONFIG.NETWORK.chainId)) {
         try {
           await ethereumProvider.request({
             method: 'wallet_switchEthereumChain',
             params: [{ chainId: CONFIG.NETWORK.chainId }],
           });
-        } catch (switchError: any) {
-          if (switchError.code === 4902) {
+        } catch (switchError: unknown) {
+          const isMissingChainError =
+            typeof switchError === 'object' &&
+            switchError !== null &&
+            'code' in switchError &&
+            switchError.code === 4902;
+
+          if (isMissingChainError) {
             await ethereumProvider.request({
               method: 'wallet_addEthereumChain',
               params: [CONFIG.NETWORK],
@@ -500,38 +856,44 @@ function App() {
         }
       }
 
-      await prov.send("eth_requestAccounts", []);
-      const sig = await prov.getSigner();
-      const address = await sig.getAddress();
+      await prov.send('eth_requestAccounts', []);
+      const nextSigner = await prov.getSigner();
+      const address = await nextSigner.getAddress();
 
       setProvider(prov);
-      setSigner(sig);
+      setSigner(nextSigner);
       setAccount(address);
       setWalletType(selectedWallet);
       localStorage.setItem('connected_wallet', selectedWallet);
       setShowWalletModal(false);
-      await fetchStats(prov, address);
+      setStakeHistory([]);
+      setSessionStakeHistory([]);
+      await Promise.all([fetchStats(prov, address), fetchOnchainHistory(address)]);
 
       setIsWalletHydrating(false);
       setStatus({ type: 'idle', msg: '' });
-    } catch (err: any) {
-      console.error(err);
+    } catch (error: unknown) {
+      console.error(error);
       setIsWalletHydrating(false);
-      setStatus({ type: 'error', msg: err.message || 'Failed to connect' });
+      setStatus({ type: 'error', msg: error instanceof Error ? error.message : 'Failed to connect' });
     }
   };
 
   useEffect(() => {
     const savedWallet = localStorage.getItem('connected_wallet') as WalletType | null;
     if (savedWallet) {
-      connectWallet(savedWallet);
+      void Promise.resolve().then(() => connectWallet(savedWallet));
     }
 
-    const ethereumProvider = savedWallet === 'talisman'
-      ? ((window as any).talismanEth || (window as any).ethereum)
-      : (window as any).ethereum;
+    const ethereumProvider =
+      savedWallet === 'talisman'
+        ? window.talismanEth || window.ethereum
+        : window.ethereum;
 
-    if (ethereumProvider) {
+    if (!ethereumProvider) {
+      return undefined;
+    }
+
       const handleAccountsChanged = (accounts: string[]) => {
         if (accounts.length > 0) {
           connectWallet();
@@ -544,35 +906,45 @@ function App() {
         window.location.reload();
       };
 
+      const accountsChangedListener = (...args: unknown[]) => {
+        const [value] = args;
+        const accounts = Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+        handleAccountsChanged(accounts);
+      };
+
+      const chainChangedListener = () => {
+        handleChainChanged();
+      };
+
       if (ethereumProvider.on) {
-        ethereumProvider.on('accountsChanged', handleAccountsChanged);
-        ethereumProvider.on('chainChanged', handleChainChanged);
+        ethereumProvider.on('accountsChanged', accountsChangedListener);
+        ethereumProvider.on('chainChanged', chainChangedListener);
       }
 
       return () => {
         if (ethereumProvider.removeListener) {
-          ethereumProvider.removeListener('accountsChanged', handleAccountsChanged);
-          ethereumProvider.removeListener('chainChanged', handleChainChanged);
+          ethereumProvider.removeListener('accountsChanged', accountsChangedListener);
+          ethereumProvider.removeListener('chainChanged', chainChangedListener);
         }
       };
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signAndExecuteIntent = async (
-    calls: any[],
-    condition: any,
-    valueToSend: bigint
-  ): Promise<boolean> => {
-    if (!signer || !account) return false;
+    calls: IntentCall[],
+    condition: IntentCondition,
+    valueToSend: bigint,
+  ): Promise<{ txHash: string; blockNumber: number } | null> => {
+    if (!signer || !account) return null;
+
     try {
       const contract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, signer);
 
       const domain = {
-        name: "SynchronousIntent",
-        version: "1",
+        name: 'SynchronousIntent',
+        version: '1',
         chainId: Number(CONFIG.NETWORK.chainId),
-        verifyingContract: CONFIG.CONTRACT_ADDRESS
+        verifyingContract: CONFIG.CONTRACT_ADDRESS,
       };
 
       const types = {
@@ -580,106 +952,133 @@ function App() {
           { name: 'asset', type: 'uint8' },
           { name: 'minOutput', type: 'uint256' },
           { name: 'hotkey', type: 'bytes32' },
-          { name: 'netuid', type: 'uint16' }
+          { name: 'netuid', type: 'uint16' },
         ],
         Call: [
           { name: 'target', type: 'address' },
           { name: 'value', type: 'uint256' },
-          { name: 'callData', type: 'bytes' }
+          { name: 'callData', type: 'bytes' },
         ],
         Intent: [
           { name: 'user', type: 'address' },
           { name: 'calls', type: 'Call[]' },
           { name: 'condition', type: 'Condition' },
           { name: 'deadline', type: 'uint256' },
-          { name: 'nonce', type: 'uint256' }
-        ]
+          { name: 'nonce', type: 'uint256' },
+        ],
       };
 
-      const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour
-      const nonce = Date.now(); // Unique nonce
+      const { deadline, nonce } = getIntentTiming();
 
       const intentValue = {
         user: account,
-        calls: calls,
-        condition: condition,
-        deadline: deadline,
-        nonce: nonce
+        calls,
+        condition,
+        deadline,
+        nonce,
       };
 
-      setStatus({ type: 'loading', msg: 'Prompting EIP-712 Signature in MetaMask...' });
+      setStatus({ type: 'loading', msg: 'Requesting signature in your wallet...' });
       const signature = await signer.signTypedData(domain, types, intentValue);
 
       const intentWithSig = {
         ...intentValue,
-        signature: signature
+        signature,
       };
 
       setStatus({ type: 'loading', msg: 'Broadcasting fillIntent transaction...' });
-      const tx = await contract.fillIntent(intentWithSig, "0x", {
+      const tx = await contract.fillIntent(intentWithSig, '0x', {
         value: valueToSend,
-        gasLimit: 800000n // Bypasses the Substrate EVM node gas estimation simulation bugs
+        gasLimit: 800000n,
       });
 
       setStatus({ type: 'loading', msg: 'Waiting for blockchain confirmation...' });
-      await tx.wait();
+      const receipt = await tx.wait();
 
-      return true;
-    } catch (err: any) {
-      console.error(err);
-      setStatus({ type: 'error', msg: err.reason || err.message || 'Transaction failed' });
-      return false;
+      return {
+        txHash: tx.hash,
+        blockNumber: receipt?.blockNumber ?? 0,
+      };
+    } catch (error: unknown) {
+      console.error(error);
+      const reason =
+        typeof error === 'object' && error !== null && 'reason' in error && typeof error.reason === 'string'
+          ? error.reason
+          : error instanceof Error
+            ? error.message
+            : 'Transaction failed';
+      setStatus({ type: 'error', msg: reason });
+      return null;
     }
   };
 
   const executeStake = async (amount: string, targetNetuid: number, targetHotkey?: string): Promise<boolean> => {
     if (!signer || !amount) return false;
+
     try {
-      setStatus({ type: 'loading', msg: `Preparing Stake Intent of ${amount} TAO...` });
+      setStatus({ type: 'loading', msg: `Preparing stake intent for ${amount} TAO...` });
 
       const amountInWei = ethers.parseEther(amount);
-      const amountInRao = amountInWei / 1000000000n; // 1e9
+      const amountInRao = amountInWei / 1000000000n;
 
-      // Resolve destination hotkey:
-      const hotkey = (targetHotkey && targetHotkey.startsWith('0x') && targetHotkey.length === 66)
-        ? targetHotkey
-        : getHotkeyForNetuid(targetNetuid);
+      const hotkey =
+        targetHotkey && targetHotkey.startsWith('0x') && targetHotkey.length === 66
+          ? targetHotkey
+          : getHotkeyForNetuid(targetNetuid);
 
-      // Encode Staking Precompile call
       const stakingInterface = new ethers.Interface([
-        "function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external"
-      ]);
-      const callData = stakingInterface.encodeFunctionData("addStake", [
-        hotkey,
-        amountInRao,
-        targetNetuid
+        'function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external',
       ]);
 
-      const calls = [{
-        target: "0x0000000000000000000000000000000000000805",
-        // V2 precompile pulls TAO from the contract's own balance automatically.
-        // Do NOT forward value here or the precompile will reject it (it is not payable).
-        value: 0n,
-        callData: callData
-      }];
+      const calls = [
+        {
+          target: '0x0000000000000000000000000000000000000805',
+          value: 0n,
+          callData: stakingInterface.encodeFunctionData('addStake', [hotkey, amountInRao, targetNetuid]),
+        },
+      ];
 
       const condition = {
-        asset: 1, // ALPHA
-        minOutput: 0n, // Bypassing slippage check — getTotalAlphaStaked fails to update synchronously on testnet
-        hotkey: hotkey,
-        netuid: targetNetuid
+        asset: 1,
+        minOutput: 0n,
+        hotkey,
+        netuid: targetNetuid,
       };
 
-      // Send amountInWei as msg.value so fillIntent holds it, and the precompile deducts from the contract balance.
-      const success = await signAndExecuteIntent(calls, condition, amountInWei);
-      if (success) {
-        setStatus({ type: 'success', msg: 'Stake intent executed successfully!' });
-        await fetchStats(provider!, account);
+      const txResult = await signAndExecuteIntent(calls, condition, amountInWei);
+      if (txResult) {
+        setSessionStakeHistory((prev) =>
+          mergeHistoryEvents(
+            [
+              {
+                type: 'stake',
+                title: 'Stake TAO',
+                detail: `${getSubnetLabel(targetNetuid)} • Hotkey ${formatShortValue(hotkey, 8, 6)}`,
+                amount: `${formatTokenAmount(amount)} TAO`,
+                user: account,
+                txHash: txResult.txHash,
+                blockNumber: txResult.blockNumber,
+                timestamp: Date.now(),
+              },
+            ],
+            prev,
+          ),
+        );
+        setStatus({ type: 'success', msg: 'Stake intent executed successfully.' });
+        await Promise.all([fetchStats(provider!, account), fetchOnchainHistory(account)]);
+        return true;
       }
-      return success;
-    } catch (err: any) {
-      console.error(err);
-      setStatus({ type: 'error', msg: err.reason || err.message || 'Failed to prepare stake' });
+
+      return false;
+    } catch (error: unknown) {
+      console.error(error);
+      const reason =
+        typeof error === 'object' && error !== null && 'reason' in error && typeof error.reason === 'string'
+          ? error.reason
+          : error instanceof Error
+            ? error.message
+            : 'Failed to prepare stake';
+      setStatus({ type: 'error', msg: reason });
       return false;
     }
   };
@@ -687,11 +1086,12 @@ function App() {
   const executeUnstake = async (
     targetNetuid: number,
     amountOrHotkey?: string,
-    amountIfHotkeyUsed?: string
+    amountIfHotkeyUsed?: string,
   ): Promise<boolean> => {
     if (!signer) return false;
+
     try {
-      setStatus({ type: 'loading', msg: 'Preparing Unstake Intent...' });
+      setStatus({ type: 'loading', msg: 'Preparing unstake intent...' });
 
       let hotkey = getHotkeyForNetuid(targetNetuid);
       let amount = amountOrHotkey;
@@ -701,49 +1101,69 @@ function App() {
         amount = amountIfHotkeyUsed;
       }
 
-      // Encode Staking Precompile call
       const stakingInterface = new ethers.Interface([
-        "function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
-        "function removeStakeFull(bytes32 hotkey, uint256 netuid) external"
+        'function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external',
+        'function removeStakeFull(bytes32 hotkey, uint256 netuid) external',
       ]);
 
-      let callData: string;
-      if (amount && amount !== '' && parseFloat(amount) > 0) {
-        const amountInRao = ethers.parseUnits(amount, 9);
-        callData = stakingInterface.encodeFunctionData("removeStake", [
-          hotkey,
-          amountInRao,
-          targetNetuid
-        ]);
-      } else {
-        callData = stakingInterface.encodeFunctionData("removeStakeFull", [
-          hotkey,
-          targetNetuid
-        ]);
-      }
+      const callData =
+        amount && amount !== '' && Number.parseFloat(amount) > 0
+          ? stakingInterface.encodeFunctionData('removeStake', [
+              hotkey,
+              ethers.parseUnits(amount, 9),
+              targetNetuid,
+            ])
+          : stakingInterface.encodeFunctionData('removeStakeFull', [hotkey, targetNetuid]);
 
-      const calls = [{
-        target: "0x0000000000000000000000000000000000000805",
-        value: 0n,
-        callData: callData
-      }];
+      const calls = [
+        {
+          target: '0x0000000000000000000000000000000000000805',
+          value: 0n,
+          callData,
+        },
+      ];
 
       const condition = {
-        asset: 0, // TAO
-        minOutput: 0n, // Bypassing — TAO balance may not update synchronously on testnet
+        asset: 0,
+        minOutput: 0n,
         hotkey: ethers.ZeroHash,
-        netuid: 0
+        netuid: 0,
       };
 
-      const success = await signAndExecuteIntent(calls, condition, 0n);
-      if (success) {
-        setStatus({ type: 'success', msg: 'Unstake intent executed successfully!' });
-        await fetchStats(provider!, account);
+      const txResult = await signAndExecuteIntent(calls, condition, 0n);
+      if (txResult) {
+        setSessionStakeHistory((prev) =>
+          mergeHistoryEvents(
+            [
+              {
+                type: 'unstake',
+                title: 'Unstake Alpha',
+                detail: `${getSubnetLabel(targetNetuid)} • Hotkey ${formatShortValue(hotkey, 8, 6)}`,
+                amount: amount && Number.parseFloat(amount) > 0 ? `${formatTokenAmount(amount)} ALPHA` : 'All ALPHA',
+                user: account,
+                txHash: txResult.txHash,
+                blockNumber: txResult.blockNumber,
+                timestamp: Date.now(),
+              },
+            ],
+            prev,
+          ),
+        );
+        setStatus({ type: 'success', msg: 'Unstake intent executed successfully.' });
+        await Promise.all([fetchStats(provider!, account), fetchOnchainHistory(account)]);
+        return true;
       }
-      return success;
-    } catch (err: any) {
-      console.error(err);
-      setStatus({ type: 'error', msg: err.reason || err.message || 'Failed to prepare unstake' });
+
+      return false;
+    } catch (error: unknown) {
+      console.error(error);
+      const reason =
+        typeof error === 'object' && error !== null && 'reason' in error && typeof error.reason === 'string'
+          ? error.reason
+          : error instanceof Error
+            ? error.message
+            : 'Failed to prepare unstake';
+      setStatus({ type: 'error', msg: reason });
       return false;
     }
   };
@@ -752,11 +1172,12 @@ function App() {
     sourceNetuid: number,
     targetNetuid: number,
     amountOrHotkey: string,
-    amountIfHotkeyUsed?: string
+    amountIfHotkeyUsed?: string,
   ): Promise<boolean> => {
     if (!signer || !amountOrHotkey) return false;
+
     try {
-      setStatus({ type: 'loading', msg: `Preparing Swap Intent...` });
+      setStatus({ type: 'loading', msg: 'Preparing subnet rotation intent...' });
 
       let sourceHotkey = getHotkeyForNetuid(sourceNetuid);
       let targetHotkey = getHotkeyForNetuid(targetNetuid);
@@ -770,89 +1191,89 @@ function App() {
 
       const amountInRao = ethers.parseUnits(amount, 9);
 
-      // Fetch dynamic Alpha price on the source subnet to determine how much TAO we will get back.
-      // We query this via our global directProvider to avoid MetaMask filtering custom Substrate RPC methods.
-      let priceInRao = 1000000000n; // Default 1:1 fallback if query fails
+      let priceInRao = 1000000000n;
       try {
         setStatus({ type: 'loading', msg: 'Fetching Alpha spot exchange rate...' });
-        const priceRes = await directProvider.send("swap_currentAlphaPrice", [sourceNetuid]);
+        const priceRes = await directProvider.send('swap_currentAlphaPrice', [sourceNetuid]);
         if (priceRes) {
           priceInRao = BigInt(priceRes);
         }
-      } catch (err) {
-        console.error("Failed to query swap_currentAlphaPrice:", err);
+      } catch (error) {
+        console.error('Failed to query swap_currentAlphaPrice:', error);
       }
 
-      // Calculate expected TAO returned with a 5% slippage buffer.
-      // Any unspent TAO is automatically swept back to the user's wallet by the contract.
       const expectedTaoInRao = (amountInRao * priceInRao * 950n) / (1000n * 1000000000n);
 
-      setStatus({ type: 'loading', msg: 'Preparing Swap Intent...' });
+      setStatus({ type: 'loading', msg: 'Preparing subnet rotation intent...' });
 
-      // Encode Staking Precompile calls
       const stakingInterface = new ethers.Interface([
-        "function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
-        "function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external"
+        'function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external',
+        'function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external',
       ]);
 
       const calls = [
-        // Call 1: Unstake Alpha from source subnet
         {
-          target: "0x0000000000000000000000000000000000000805",
+          target: '0x0000000000000000000000000000000000000805',
           value: 0n,
-          callData: stakingInterface.encodeFunctionData("removeStake", [
+          callData: stakingInterface.encodeFunctionData('removeStake', [
             sourceHotkey,
             amountInRao,
-            sourceNetuid
-          ])
+            sourceNetuid,
+          ]),
         },
-        // Call 2: Stake TAO to target subnet
         {
-          target: "0x0000000000000000000000000000000000000805",
+          target: '0x0000000000000000000000000000000000000805',
           value: 0n,
-          callData: stakingInterface.encodeFunctionData("addStake", [
+          callData: stakingInterface.encodeFunctionData('addStake', [
             targetHotkey,
-            expectedTaoInRao, // Dynamic and correct TAO amount
-            targetNetuid
-          ])
-        }
+            expectedTaoInRao,
+            targetNetuid,
+          ]),
+        },
       ];
 
       const condition = {
-        asset: 1, // ALPHA
-        minOutput: 0n, // Bypassing slippage check — getTotalAlphaStaked fails to update synchronously on testnet
+        asset: 1,
+        minOutput: 0n,
         hotkey: targetHotkey,
-        netuid: targetNetuid
+        netuid: targetNetuid,
       };
 
-      const success = await signAndExecuteIntent(calls, condition, 0n);
-      if (success) {
-        setStatus({ type: 'success', msg: 'Swap intent executed successfully!' });
-        await fetchStats(provider!, account);
+      const txResult = await signAndExecuteIntent(calls, condition, 0n);
+      if (txResult) {
+        setSessionStakeHistory((prev) =>
+          mergeHistoryEvents(
+            [
+              {
+                type: 'swap',
+                title: 'Move stake',
+                detail: `${getSubnetLabel(sourceNetuid)} → ${getSubnetLabel(targetNetuid)}`,
+                amount: `${formatTokenAmount(amount)} ALPHA`,
+                user: account,
+                txHash: txResult.txHash,
+                blockNumber: txResult.blockNumber,
+                timestamp: Date.now(),
+              },
+            ],
+            prev,
+          ),
+        );
+        setStatus({ type: 'success', msg: 'Subnet rotation executed successfully.' });
+        await Promise.all([fetchStats(provider!, account), fetchOnchainHistory(account)]);
+        return true;
       }
-      return success;
-    } catch (err: any) {
-      console.error(err);
-      setStatus({ type: 'error', msg: err.reason || err.message || 'Failed to prepare swap' });
+
       return false;
-    }
-  };
-
-  const getHotkeyForNetuid = (net: number): string => {
-    if (net === 310) {
-      return "0x3cba5f549c02a4da782cadb65564d0e8159f339f5610db4bd5773f36c760f97c";
-    }
-    // Default fallback (Subnets 0, 1, etc.)
-    return "0x1e738b33dfbd68eaba7db3f03fe942cfa4e32b728e52c26743b16dbca15af464";
-  };
-
-  const handlePositionClick = (net: number) => {
-    setNetuid(net);
-    setUnstakeNetuid(net);
-    setSwapSourceNetuid(net);
-    // Automatically switch to unstake tab if currently on stake tab so they can see unstake options
-    if (stakingAction === 'stake') {
-      setStakingAction('unstake');
+    } catch (error: unknown) {
+      console.error(error);
+      const reason =
+        typeof error === 'object' && error !== null && 'reason' in error && typeof error.reason === 'string'
+          ? error.reason
+          : error instanceof Error
+            ? error.message
+            : 'Failed to prepare subnet rotation';
+      setStatus({ type: 'error', msg: reason });
+      return false;
     }
   };
 
@@ -860,6 +1281,7 @@ function App() {
     const hotkey = stakedHotkeys[netuid] || getHotkeyForNetuid(netuid);
     if (await executeStake(stakeAmount, netuid, hotkey)) {
       setStakeAmount('');
+      setAppView('history');
     }
   };
 
@@ -867,79 +1289,69 @@ function App() {
     const hotkey = stakedHotkeys[unstakeNetuid] || getHotkeyForNetuid(unstakeNetuid);
     if (await executeUnstake(unstakeNetuid, hotkey, unstakeAmount)) {
       setUnstakeAmount('');
+      setAppView('history');
     }
   };
 
   const handleSwap = async () => {
-    const amountToSwap = swapAmount !== '' ? swapAmount : (allAlphaBalances[swapSourceNetuid] || '0');
-    if (!amountToSwap || parseFloat(amountToSwap) <= 0) {
-      setStatus({ type: 'error', msg: 'Please enter a valid amount of ALPHA to swap.' });
+    const amountToSwap = swapAmount !== '' ? swapAmount : allAlphaBalances[swapSourceNetuid] || '0';
+    if (!amountToSwap || Number.parseFloat(amountToSwap) <= 0) {
+      setStatus({ type: 'error', msg: 'Please enter a valid amount of ALPHA to move.' });
       return;
     }
+
     const hotkey = stakedHotkeys[swapSourceNetuid] || getHotkeyForNetuid(swapSourceNetuid);
     if (await executeSwap(swapSourceNetuid, swapTargetNetuid, hotkey, amountToSwap)) {
       setSwapAmount('');
+      setAppView('history');
     }
   };
 
-  const formatShortValue = (value: string, start = 8, end = 6) => {
-    if (!value) return '';
-    return `${value.slice(0, start)}...${value.slice(-end)}`;
+  const openApp = (view: AppView = 'chat') => {
+    setSurface('app');
+    setAppView(view);
   };
 
-  const getSubnetLabel = (net: number) => {
-    if (net === 310) return 'Alpha Subnet';
-    if (net === 0) return 'Root Network';
-    if (net === 1) return 'Subnet 1';
-    return `Subnet ${net}`;
-  };
+  const renderWalletCardStyle = (option: WalletOption): CSSProperties =>
+    ({
+      '--wallet-accent': option.accent,
+      '--wallet-accent-rgb': option.accentRgb,
+    }) as CSSProperties;
 
-  const getWalletOption = (wallet: WalletType | null) =>
-    wallet ? WALLET_OPTIONS.find((option) => option.id === wallet) ?? null : null;
+  const activePositions = Object.entries(allAlphaBalances).filter(([, bal]) => Number.parseFloat(bal) > 0);
+  const stakingPositions: StakingPositionSummary[] = activePositions
+    .map(([id, bal]) => {
+      const targetNetuid = Number(id);
+      const subnetMeta = getSubnetMeta(targetNetuid);
 
-  const renderWalletCardStyle = (option: WalletOption): CSSProperties => ({
-    '--wallet-accent': option.accent,
-    '--wallet-accent-rgb': option.accentRgb,
-  } as CSSProperties);
-
-  const activePositions = Object.entries(allAlphaBalances).filter(([, bal]) => parseFloat(bal) > 0);
-  const selectedWalletOption = getWalletOption(walletType);
-  const showStatusBanner = Boolean(status.msg) && !(status.type === 'loading' && (!account || isWalletHydrating));
+      return {
+        netuid: targetNetuid,
+        title: subnetMeta ? `${subnetMeta.name} Subnet` : `Subnet ${targetNetuid}`,
+        badge: `Netuid ${targetNetuid}`,
+        hotkey: stakedHotkeys[targetNetuid] || getHotkeyForNetuid(targetNetuid),
+        amount: formatTokenAmount(bal),
+        apy: getMockApyForNetuid(targetNetuid),
+      };
+    })
+    .sort((left, right) => Number.parseFloat(right.amount) - Number.parseFloat(left.amount));
   const connectingWallet =
     !account && status.type === 'loading'
       ? WALLET_OPTIONS.find((option) => status.msg.toLowerCase().includes(option.label.toLowerCase()))?.id ?? null
       : null;
-  const chainId = Number.parseInt(CONFIG.NETWORK.chainId, 16);
-
-  const renderWalletConnectCard = (option: WalletOption) => {
-    const isConnecting = connectingWallet === option.id;
-
-    return (
-      <button
-        key={option.id}
-        type="button"
-        className={`wallet-option-card ${isConnecting ? 'is-loading' : ''}`}
-        style={renderWalletCardStyle(option)}
-        onClick={() => connectWallet(option.id)}
-        disabled={Boolean(connectingWallet)}
-      >
-        <div className="wallet-option-card__glow" />
-        <div className="wallet-option-card__shine" />
-        <div className="wallet-option-card__topline">
-          <span className="wallet-option-card__badge">{option.subtitle}</span>
-          <div className="wallet-option-card__icon-shell">
-            <img src={option.iconSrc} alt="" className="wallet-option-card__icon" />
-          </div>
-        </div>
-        <img src={option.wordmarkSrc} alt={`${option.label} logo`} className="wallet-option-card__wordmark" />
-        <p className="wallet-option-card__description">{option.description}</p>
-        <div className="wallet-option-card__footer">
-          <span>{isConnecting ? `Authorizing ${option.label}` : `Use ${option.label}`}</span>
-          <span className="wallet-option-card__pulse" />
-        </div>
-      </button>
-    );
-  };
+  const showStatusBanner = Boolean(status.msg) && !(status.type === 'loading' && (!account || isWalletHydrating));
+  const combinedHistory = mergeHistoryEvents(stakeHistory, sessionStakeHistory);
+  const filteredHistory =
+    historyFilter === 'all' ? combinedHistory : combinedHistory.filter((event) => event.type === historyFilter);
+  const historyNote =
+    historySource === 'wallet' && account
+      ? `Showing confirmed fills for ${formatShortValue(account, 6, 4)}.`
+      : account
+        ? 'Showing recent confirmed contract activity. This wallet has no direct fillIntent events yet.'
+        : 'Showing recent confirmed activity from the intent contract.';
+  const selectedStakeSubnet = getSubnetPresentation(netuid);
+  const selectedSwapSourceSubnet = getSubnetPresentation(swapSourceNetuid);
+  const selectedSwapTargetSubnet = getSubnetPresentation(swapTargetNetuid);
+  const selectedUnstakeSubnet = getSubnetPresentation(unstakeNetuid);
 
   const renderWalletModalOption = (option: WalletOption) => {
     const isConnecting = connectingWallet === option.id;
@@ -965,583 +1377,941 @@ function App() {
     );
   };
 
-  const renderWalletHydrationSkeleton = () => (
-    <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '32px' }} className="stats-grid-3">
-        {[
-          { label: 'TAO Balance', unit: 'TAO' },
-          { label: `Your Alpha (Netuid ${netuid})`, unit: 'ALPHA' },
-          { label: `Global Hotkey (Netuid ${CONFIG.DEFAULT_NETUID})`, unit: 'ALPHA' },
-        ].map((item) => (
-          <div key={item.label} className="glass-panel skeleton-stat-card">
-            <p className="skeleton-static-eyebrow">{item.label}</p>
-            <div className="skeleton-stat-value-row">
-              <div className="skeleton-block skeleton-value" />
-              <span className="skeleton-static-unit">{item.unit}</span>
+  const renderInlineWalletPill = () =>
+    account ? (
+      <div className="wallet-inline-actions">
+        <div className="wpill">
+          <div className="wdot" />
+          <div className="waddr">{formatShortValue(account, 6, 4)}</div>
+          <div className="wnet">Bittensor EVM</div>
+        </div>
+        <button type="button" className="tao-btn tao-btn--ghost tao-btn--small" onClick={disconnectWallet}>
+          Disconnect
+        </button>
+      </div>
+    ) : (
+      <button type="button" className="tao-btn tao-btn--primary tao-btn--small" onClick={() => setShowWalletModal(true)}>
+        Connect wallet
+      </button>
+    );
+
+  const renderLoadingState = () => (
+    <div className="loading-shell">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className="loading-card shimmer-block" />
+      ))}
+    </div>
+  );
+
+  const renderDashboardView = () => {
+    if (isWalletHydrating) {
+      return renderLoadingState();
+    }
+
+    const stakeAmountValue = Number.parseFloat(stakeAmount || '0');
+    const swapAmountValue = Number.parseFloat(swapAmount || allAlphaBalances[swapSourceNetuid] || '0');
+    const unstakeAmountValue = Number.parseFloat(unstakeAmount || allAlphaBalances[unstakeNetuid] || '0');
+    const selectedApy = Number.parseFloat(
+      (stakingAction === 'stake'
+        ? selectedStakeSubnet.apy
+        : stakingAction === 'swap'
+          ? selectedSwapTargetSubnet.apy
+          : selectedUnstakeSubnet.apy
+      ).replace('%', ''),
+    );
+    const simulationBase =
+      stakingAction === 'stake' ? stakeAmountValue : stakingAction === 'swap' ? swapAmountValue : unstakeAmountValue;
+    const thirtyDayReturn = (simulationBase * selectedApy) / 12 / 100;
+    const ninetyDayReturn = (simulationBase * selectedApy) / 4 / 100;
+    const yearlyReturn = (simulationBase * selectedApy) / 100;
+    const activeSwapSources = activePositions.length > 0 ? activePositions : [['310', allAlphaBalances[310] || '0']];
+
+    return (
+      <div className="swap-wrap">
+        <div className="swap-head">
+          <h2>Swap &amp; Stake</h2>
+          {renderInlineWalletPill()}
+        </div>
+
+        <div className="swap-mode-row">
+          <button
+            type="button"
+            className={`fp ${stakingAction === 'stake' ? 'on' : ''}`}
+            onClick={() => setStakingAction('stake')}
+          >
+            Stake
+          </button>
+          <button
+            type="button"
+            className={`fp ${stakingAction === 'swap' ? 'on' : ''}`}
+            onClick={() => setStakingAction('swap')}
+          >
+            Move
+          </button>
+          <button
+            type="button"
+            className={`fp ${stakingAction === 'unstake' ? 'on' : ''}`}
+            onClick={() => setStakingAction('unstake')}
+          >
+            Unstake
+          </button>
+          <div className="swap-mode-note">
+            External-chain deposits stay clearly marked as coming soon.
+            {account ? ` Tracked total: ${formatTokenAmount(totalAlphaStaked)} ALPHA.` : ''}
+          </div>
+        </div>
+
+        <div className="swap-body">
+          <div>
+            <div className="scard">
+              <div className="scard-head">
+                {stakingAction === 'stake'
+                  ? 'Stake TAO'
+                  : stakingAction === 'swap'
+                    ? 'Move stake'
+                    : 'Unstake ALPHA'}
+              </div>
+              <div className="scard-body">
+                {stakingAction === 'swap' && (
+                  <div className="swap-source-picker">
+                    <div className="swap-source-picker__label">Source route</div>
+                    <div className="swap-source-picker__row">
+                      {activeSwapSources.map(([id, bal]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          className={`swap-source-pill ${swapSourceNetuid === Number(id) ? 'is-active' : ''}`}
+                          onClick={() => setSwapSourceNetuid(Number(id))}
+                        >
+                          {getSubnetLabel(Number(id))} · {formatTokenAmount(bal)} ALPHA
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="tbox">
+                  <div className="tbox-top">
+                    <span className="tbox-label">
+                      {stakingAction === 'stake' ? 'You send' : stakingAction === 'swap' ? 'You move' : 'You remove'}
+                    </span>
+                    <span className="tbox-bal">
+                      {stakingAction === 'stake'
+                        ? `Balance: ${formatTokenAmount(balance)} TAO`
+                        : `Balance: ${formatTokenAmount(
+                            allAlphaBalances[stakingAction === 'swap' ? swapSourceNetuid : unstakeNetuid] || '0',
+                          )} ALPHA`}
+                      {' · '}
+                      <span
+                        onClick={() =>
+                          stakingAction === 'stake'
+                            ? setStakeAmount(balance)
+                            : stakingAction === 'swap'
+                              ? setSwapAmount(allAlphaBalances[swapSourceNetuid] || '0')
+                              : setUnstakeAmount(allAlphaBalances[unstakeNetuid] || '0')
+                        }
+                      >
+                        Max
+                      </span>
+                    </span>
+                  </div>
+                  <div className="tbox-main">
+                    <div className="tok">
+                      <div className={`tok-ic ${stakingAction === 'stake' ? 'it' : 'ia'}`}>
+                        {stakingAction === 'stake' ? 'τ' : 'α'}
+                      </div>
+                      {stakingAction === 'stake' ? 'TAO' : 'ALPHA'}
+                    </div>
+                    <div className="swap-amount-shell">
+                      <input
+                        type="number"
+                        className="swap-amt-input"
+                        placeholder="0.00"
+                        value={stakingAction === 'stake' ? stakeAmount : stakingAction === 'swap' ? swapAmount : unstakeAmount}
+                        onChange={(event) =>
+                          stakingAction === 'stake'
+                            ? setStakeAmount(event.target.value)
+                            : stakingAction === 'swap'
+                              ? setSwapAmount(event.target.value)
+                              : setUnstakeAmount(event.target.value)
+                        }
+                      />
+                      <div className="tok-usd">
+                        {stakingAction === 'stake'
+                          ? 'Native TAO on Bittensor EVM'
+                          : stakingAction === 'swap'
+                            ? `From ${selectedSwapSourceSubnet.code}`
+                            : `From ${selectedUnstakeSubnet.code}`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="swap-mid-row">
+                  <button type="button" className="swaptog">
+                    ⇅
+                  </button>
+                </div>
+
+                <div className="tbox">
+                  <div className="tbox-top">
+                    <span className="tbox-label">
+                      {stakingAction === 'stake'
+                        ? 'You receive (staked)'
+                        : stakingAction === 'swap'
+                          ? 'You receive'
+                          : 'You receive back'}
+                    </span>
+                    <span className="tbox-bal">Bittensor EVM only</span>
+                  </div>
+                  <div className="tbox-main">
+                    <div className="tok">
+                      <div className={`tok-ic ${stakingAction === 'unstake' ? 'it' : 'ia'}`}>
+                        {stakingAction === 'unstake' ? 'τ' : 'α'}
+                      </div>
+                      {stakingAction === 'unstake' ? 'TAO' : 'ALPHA'}
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="tok-amt" style={stakingAction !== 'unstake' ? { color: 'var(--text-2)' } : undefined}>
+                        ≈
+                        {formatTokenAmount(
+                          stakingAction === 'stake'
+                            ? stakeAmount || '0'
+                            : stakingAction === 'swap'
+                              ? swapAmount || allAlphaBalances[swapSourceNetuid] || '0'
+                              : unstakeAmount || allAlphaBalances[unstakeNetuid] || '0',
+                        )}
+                      </div>
+                      <div className="tok-usd">
+                        {stakingAction === 'stake'
+                          ? `Staked on ${selectedStakeSubnet.code}`
+                          : stakingAction === 'swap'
+                            ? `Moved to ${selectedSwapTargetSubnet.code}`
+                            : 'Returned to connected wallet'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ margin: '1rem 0 .5rem' }}>
+                  {stakingAction === 'stake' && (
+                    <>
+                      <div className="det-row">
+                        <span>Stake destination</span>
+                        <span>{getSubnetLabel(netuid)}</span>
+                      </div>
+                      <div className="det-row">
+                        <span>Current APY</span>
+                        <span style={{ color: 'var(--success)' }}>{selectedStakeSubnet.apy}</span>
+                      </div>
+                    </>
+                  )}
+                  {stakingAction === 'swap' && (
+                    <>
+                      <div className="det-row">
+                        <span>Source route</span>
+                        <span>{getSubnetLabel(swapSourceNetuid)}</span>
+                      </div>
+                      <div className="det-row">
+                        <span>Destination</span>
+                        <span>{getSubnetLabel(swapTargetNetuid)}</span>
+                      </div>
+                    </>
+                  )}
+                  {stakingAction === 'unstake' && (
+                    <>
+                      <div className="det-row">
+                        <span>From subnet</span>
+                        <span>{getSubnetLabel(unstakeNetuid)}</span>
+                      </div>
+                      <div className="det-row">
+                        <span>Unbonding</span>
+                        <span>~12 seconds</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="det-row">
+                    <span>Network gas</span>
+                    <span>~0.0004 TAO</span>
+                  </div>
+                  <div className="det-row">
+                    <span>Estimated arrival</span>
+                    <span style={{ color: 'var(--success)' }}>~12 seconds</span>
+                  </div>
+                </div>
+
+                <div className="swap-sim">
+                  <div className="swap-sim-t">
+                    {stakingAction === 'unstake'
+                      ? 'Estimated unlocked TAO'
+                      : `Simulated returns at ${selectedApy.toFixed(1)}% APY`}
+                  </div>
+                  <div className="swap-sim-g">
+                    <div className="ssim">
+                      <div className="ssim-p">30 days</div>
+                      <div className="ssim-v">
+                        {stakingAction === 'unstake' ? formatTokenAmount(String(simulationBase)) : `+${formatTokenAmount(String(thirtyDayReturn))}`}
+                      </div>
+                    </div>
+                    <div className="ssim">
+                      <div className="ssim-p">90 days</div>
+                      <div className="ssim-v">
+                        {stakingAction === 'unstake' ? formatTokenAmount(String(simulationBase)) : `+${formatTokenAmount(String(ninetyDayReturn))}`}
+                      </div>
+                    </div>
+                    <div className="ssim">
+                      <div className="ssim-p">1 year</div>
+                      <div className="ssim-v">
+                        {stakingAction === 'unstake' ? formatTokenAmount(String(simulationBase)) : `+${formatTokenAmount(String(yearlyReturn))}`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {stakingAction === 'stake' && (
+                  <button
+                    type="button"
+                    className="swap-action-btn"
+                    onClick={handleBuyAlpha}
+                    disabled={!account || !stakeAmount || status.type === 'loading'}
+                  >
+                    Stake on {selectedStakeSubnet.code} →
+                  </button>
+                )}
+
+                {stakingAction === 'swap' && (
+                  <button
+                    type="button"
+                    className="swap-action-btn"
+                    onClick={handleSwap}
+                    disabled={
+                      !account ||
+                      status.type === 'loading' ||
+                      (swapAmount === '' &&
+                        (!allAlphaBalances[swapSourceNetuid] || Number.parseFloat(allAlphaBalances[swapSourceNetuid]) === 0))
+                    }
+                  >
+                    Move stake to {selectedSwapTargetSubnet.code} →
+                  </button>
+                )}
+
+                {stakingAction === 'unstake' && (
+                  <button
+                    type="button"
+                    className="swap-action-btn"
+                    onClick={handleUnstake}
+                    disabled={
+                      !account ||
+                      status.type === 'loading' ||
+                      !(allAlphaBalances[unstakeNetuid] && Number.parseFloat(allAlphaBalances[unstakeNetuid]) > 0)
+                    }
+                  >
+                    Unstake from {selectedUnstakeSubnet.code} →
+                  </button>
+                )}
+              </div>
             </div>
           </div>
+
+          <div>
+            <div className="scard">
+              <div className="scard-head">
+                {stakingAction === 'stake'
+                  ? 'Staking Positions'
+                  : stakingAction === 'unstake'
+                    ? 'Current routes'
+                    : 'Stake destination'}
+              </div>
+              <div className="scard-body">
+                <p className="swap-side-copy">
+                  {stakingAction === 'stake'
+                    ? stakingPositions.length > 0
+                      ? 'Your current on-chain stakes and validator routes. Click any position to load it into the form.'
+                      : 'No live staking positions yet, so default subnet choices are shown for your next stake.'
+                    : stakingAction === 'unstake'
+                      ? 'Choose which live Bittensor EVM route you want to unwind.'
+                      : 'Choose which Bittensor subnet receives your position. External-chain funding stays marked as coming soon.'}
+                </p>
+                {stakingAction === 'stake' && stakingPositions.length > 0 ? (
+                  <div className="staking-position-list">
+                    {stakingPositions.map((position) => (
+                      <button
+                        key={`${position.netuid}-${position.hotkey}`}
+                        type="button"
+                        className={`staking-position-card ${netuid === position.netuid ? 'is-selected' : ''}`}
+                        onClick={() => setNetuid(position.netuid)}
+                      >
+                        <div className="staking-position-card__top">
+                          <div>
+                            <div className="staking-position-card__title">{position.title}</div>
+                            <div className="staking-position-card__badge">{position.badge}</div>
+                          </div>
+                          <div className="staking-position-card__value">
+                            <strong>{position.amount}</strong>
+                            <span>ALPHA</span>
+                          </div>
+                        </div>
+                        <div className="staking-position-card__bottom">
+                          <span>Validator {formatShortValue(position.hotkey, 8, 6)}</span>
+                          <span className="staking-position-card__apy">Mock APY {position.apy}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="sn-list">
+                    {(stakingAction === 'unstake' ? activePositions.map(([id]) => Number(id)) : DISPLAY_SUBNETS.map((subnet) => subnet.netuid)).map(
+                      (displayNetuid) => {
+                        const displayMeta = getSubnetPresentation(displayNetuid);
+                        const isSelected =
+                          stakingAction === 'stake'
+                            ? netuid === displayNetuid
+                            : stakingAction === 'swap'
+                              ? swapTargetNetuid === displayNetuid
+                              : unstakeNetuid === displayNetuid;
+                        const routeAmount = allAlphaBalances[displayNetuid] || '0';
+
+                        return (
+                          <button
+                            key={displayNetuid}
+                            type="button"
+                            className={`sn-r ${isSelected ? 'sel' : ''}`}
+                            onClick={() =>
+                              stakingAction === 'stake'
+                                ? setNetuid(displayNetuid)
+                                : stakingAction === 'swap'
+                                  ? setSwapTargetNetuid(displayNetuid)
+                                  : setUnstakeNetuid(displayNetuid)
+                            }
+                          >
+                            <div className="sn-num">{displayMeta.code}</div>
+                            <div className="sn-info">
+                              <div className="sn-name">{displayMeta.name}</div>
+                              <div className="sn-cat">
+                                {stakingAction === 'unstake'
+                                  ? `Staked balance · ${formatTokenAmount(routeAmount)} ALPHA`
+                                  : displayMeta.category}
+                              </div>
+                            </div>
+                            <div className="sn-apy">
+                              {stakingAction === 'unstake' ? `${formatTokenAmount(routeAmount)}α` : displayMeta.apy}
+                            </div>
+                            <div className="snr-radio" />
+                          </button>
+                        );
+                      },
+                    )}
+                  </div>
+                )}
+                <div className="swap-side-footnote">
+                  {stakingAction === 'stake'
+                    ? 'APY is mocked for now in this panel. The positions and validator routes themselves are sourced from your live on-chain stake.'
+                    : stakingAction === 'unstake'
+                    ? 'Unstaking returns native TAO to the connected wallet after the on-chain unbonding step.'
+                    : 'Bittensor EVM flows are live today. Solana, Ethereum, and other external-chain deposits are coming soon.'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderHistoryView = () => (
+    <div className="hist-wrap">
+      <div className="hist-top">
+        <h2>History</h2>
+        <button type="button" className="tao-btn tao-btn--ghost tao-btn--small">
+          Export CSV
+        </button>
+      </div>
+
+      <div className="frow">
+        {[
+          { id: 'all' as const, label: 'All' },
+          { id: 'stake' as const, label: 'Stakes' },
+          { id: 'unstake' as const, label: 'Unstakes' },
+          { id: 'swap' as const, label: 'Moves' },
+        ].map((filter) => (
+          <button
+            key={filter.id}
+            type="button"
+            className={`fp ${historyFilter === filter.id ? 'on' : ''}`}
+            onClick={() => setHistoryFilter(filter.id)}
+          >
+            {filter.label}
+          </button>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '24px', alignItems: 'start' }} className="grid-cols-2">
-        <div className="glass-panel skeleton-engine-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-            <ArrowRightLeft size={20} color="var(--accent-primary)" />
-            <h3 style={{ margin: 0, fontWeight: 700, fontSize: '18px', letterSpacing: '-0.02em' }}>Staking Engine</h3>
-          </div>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
-            Configure and execute Bittensor precompile staking operations atomically.
-          </p>
+      <div className="history-note">{historyNote}</div>
 
-          <div className="skeleton-tabs">
-            <div className="skeleton-tab-shell is-active"><span>Stake TAO</span></div>
-            <div className="skeleton-tab-shell"><span>Swap Stake</span></div>
-            <div className="skeleton-tab-shell"><span>Remove Stake</span></div>
-          </div>
-
-          <div className="skeleton-form-stack">
-            <div className="skeleton-form-group">
-              <div className="skeleton-form-label-row">
-                <label className="text-sm skeleton-static-label">Target Subnet (Netuid)</label>
-                <div className="skeleton-pill-group">
-                  <span className="skeleton-static-pill">Netuid 0</span>
-                  <span className="skeleton-static-pill">Netuid 1</span>
-                  <span className="skeleton-static-pill active">Netuid 310</span>
-                </div>
-              </div>
-              <div className="skeleton-input-shell">
-                <div className="skeleton-block skeleton-input-value short" />
-              </div>
-            </div>
-
-            <div className="skeleton-form-group">
-              <div className="skeleton-form-label-row">
-                <label className="text-sm skeleton-static-label">Amount <span style={{ color: 'var(--accent-secondary)' }}>TAO</span></label>
-                <div className="skeleton-block skeleton-inline-note" />
-              </div>
-              <div className="skeleton-input-shell">
-                <div className="skeleton-block skeleton-input-value" />
-              </div>
-            </div>
-
-            <button className="btn btn-secondary skeleton-action-button" disabled>
-              <Activity size={16} /> Stake TAO
-            </button>
-          </div>
+      {isHistoryLoading ? (
+        <div className="empty">
+          <div className="empty-ic">◌</div>
+          <div className="empty-t">Loading contract history</div>
+          <div className="empty-d">Fetching confirmed stake, unstake, and move intents from the contract.</div>
         </div>
-
-        <div className="glass-panel skeleton-positions-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-            <Activity size={20} color="var(--accent-secondary)" />
-            <h3 style={{ margin: 0, fontWeight: 700, fontSize: '18px', letterSpacing: '-0.02em' }}>Staking Positions</h3>
-          </div>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
-            Your current on-chain stakes and validator routes. Click any position to load it into the form.
-          </p>
-
-          <div className="skeleton-position-stack">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <div key={index} className="skeleton-position-item">
-                <div>
-                  <div className="skeleton-position-topline">
-                    <div className="skeleton-block skeleton-position-title" />
-                    <div className="skeleton-block skeleton-position-pill" />
-                  </div>
-                  <div className="position-validator-line">
-                    <span className="position-validator-line__label">Validator</span>
-                    <div className="skeleton-block skeleton-position-meta" />
-                  </div>
-                </div>
-                <div className="skeleton-position-amount">
-                  <div className="skeleton-block skeleton-position-value" />
-                  <span className="skeleton-static-unit small">ALPHA</span>
-                </div>
-              </div>
+      ) : filteredHistory.length > 0 ? (
+        <table className="htable">
+          <thead>
+            <tr>
+              <th style={{ width: '130px' }}>Date</th>
+              <th style={{ width: '110px' }}>Type</th>
+              <th>Details</th>
+              <th style={{ width: '120px' }}>Amount</th>
+              <th style={{ width: '85px' }}>Status</th>
+              <th style={{ width: '105px' }}>Tx Hash</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredHistory.map((event) => (
+              <tr key={`${event.txHash}-${event.timestamp}`}>
+                <td style={{ color: 'var(--text-2)' }}>{formatHistoryTime(event.timestamp)}</td>
+                <td>
+                  <span className={`tt ${event.type === 'stake' ? 'tt-s' : event.type === 'unstake' ? 'tt-u' : 'tt-x'}`}>
+                    {event.type === 'stake' ? '↑ Stake' : event.type === 'unstake' ? '↓ Unstake' : '⇄ Move'}
+                  </span>
+                </td>
+                <td>{event.detail}</td>
+                <td className={event.type === 'unstake' ? 'amt-n' : 'amt-p'}>
+                  {event.type === 'unstake' ? '−' : '+'}
+                  {event.amount}
+                </td>
+                <td className="tx-ok">✓ Done</td>
+                <td>
+                  <a
+                    href={`${EXPLORER_BASE_URL}${event.txHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="tx-hash"
+                  >
+                    {formatShortValue(event.txHash, 10, 6)}
+                  </a>
+                </td>
+              </tr>
             ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className="empty">
+          <div className="empty-ic">☰</div>
+          <div className="empty-t">No matching activity yet</div>
+          <div className="empty-d">
+            {account
+              ? 'Confirmed stake, unstake, and move intents will appear here once they exist on-chain.'
+              : 'Connect a wallet to load confirmed stake, unstake, and move intents from the contract.'}
           </div>
         </div>
-      </div>
-    </>
+      )}
+    </div>
   );
 
   return (
     <>
-      <header className="app-header">
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <img src="/logo-white.png" alt="Terabitt Logo" style={{ height: '26px', width: 'auto', objectFit: 'contain' }} />
-          <span style={{ fontWeight: 700, fontSize: '18px', letterSpacing: '-0.03em' }}>terabitt</span>
-        </div>
+      {surface === 'landing' ? (
+        <div className="landing-shell landing-shell--taochat">
+          <header className="tao-nav">
+            <div className="tao-logo">
+              tao<b>chat</b>
+            </div>
 
-        {/* Center Nav */}
-        <nav style={{ display: 'flex', gap: '4px', background: 'rgba(255,255,255,0.04)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
-          <a href="#" className={`nav-link ${activeTab === 'staking' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('staking'); }}>Staking</a>
-          <a href="#" className={`nav-link ${activeTab === 'chat' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('chat'); }}>AI Agent</a>
-        </nav>
+            <nav className="tao-nav__links">
+              <a href="#vision">Vision</a>
+              <a href="#usecases">Use cases</a>
+              <a href="#how">How it works</a>
+            </nav>
 
-        {/* Wallet */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {account ? (
-            <div className="wallet-toolbar">
-              <div className="wallet-connected-chip">
-                {selectedWalletOption && (
-                  <div
-                    className="wallet-connected-chip__icon-shell"
-                    style={renderWalletCardStyle(selectedWalletOption)}
-                  >
-                    <img src={selectedWalletOption.iconSrc} alt="" className="wallet-connected-chip__icon" />
+            <div className="tao-nav__actions">
+              {account ? (
+                <div className="wallet-inline-actions">
+                  <div className="tao-status-pill">
+                    <span className="status-dot status-dot--success" />
+                    {formatShortValue(account, 6, 4)}
                   </div>
-                )}
-                <div className="wallet-connected-chip__copy">
-                  <span className="wallet-connected-chip__label">{selectedWalletOption?.label || 'Wallet'}</span>
-                  <div className="wallet-connected-chip__address">
-                    <span className="status-indicator"></span>
-                    <span className="mono text-sm">{formatShortValue(account, 6, 4)}</span>
-                  </div>
+                  <button type="button" className="tao-btn tao-btn--ghost tao-btn--small" onClick={disconnectWallet}>
+                    Disconnect
+                  </button>
                 </div>
-              </div>
-              <button
-                className="btn btn-secondary"
-                style={{ padding: '8px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                onClick={disconnectWallet}
-                title="Disconnect Wallet"
-              >
-                <LogOut size={16} color="var(--status-error)" />
+              ) : (
+                <button type="button" className="tao-btn tao-btn--ghost" onClick={() => setShowWalletModal(true)}>
+                  Connect wallet
+                </button>
+              )}
+              <button type="button" className="tao-btn tao-btn--primary" onClick={() => openApp()}>
+                Launch app →
               </button>
             </div>
-          ) : (
-            <button className="btn btn-primary" onClick={() => setShowWalletModal(true)}>
-              <Wallet size={15} /> Connect Wallet
-            </button>
-          )}
+          </header>
+
+          <main>
+            <section className="tao-hero">
+              <div className="tao-badge">
+                <span className="tao-badge__dot" />
+                Live on Bittensor EVM only
+              </div>
+              <h1>
+                Bittensor DeFi.
+                <br />
+                <em>Just say it.</em>
+              </h1>
+              <p>
+                Stake, unstake, and swap on Bittensor subnets using plain English. External-chain routes will land
+                later, but the live experience today stays focused on Bittensor EVM only.
+              </p>
+              <div className="tao-hero__actions">
+                <button type="button" className="tao-btn tao-btn--primary tao-btn--large" onClick={() => openApp()}>
+                  Launch app →
+                </button>
+                <button type="button" className="tao-btn tao-btn--ghost tao-btn--large">
+                  Read docs
+                </button>
+              </div>
+            </section>
+
+            <section className="tao-ticker" aria-label="Featured subnet routes">
+              <div className="tao-ticker__track">
+                {[...LANDING_TICKER, ...LANDING_TICKER].map((item, index) => (
+                  <div key={`${item.label}-${index}`} className="tao-ticker__item">
+                    <span className="tao-ticker__label">{item.label}</span>
+                    <span>{item.value}</span>
+                    <span className={item.positive ? 'is-positive' : 'is-negative'}>{item.delta}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="tao-demo" id="demo">
+              <div className="tao-demo__inner">
+                <div className="tao-section-tag">See it in action</div>
+                <div className="tao-section-title tao-section-title--demo">One message. Done.</div>
+                <div className="tao-demo__window">
+                  <div className="tao-demo__bar">
+                    <div className="tao-demo__title">
+                      <span className="tao-demo__dot" />
+                      <span>TaoChat</span>
+                    </div>
+                    <div className="tao-demo__connected">● Connected</div>
+                  </div>
+
+                  <div className="tao-demo__body">
+                    <div className="tao-demo__row tao-demo__row--user">
+                      <div className="tao-demo__bubble tao-demo__bubble--user">Stake 100 TAO on the strongest subnet right now</div>
+                    </div>
+                    <div className="tao-demo__row">
+                      <div className="tao-demo__bubble tao-demo__bubble--bot">
+                        I found a top route, drafted the staking intent, and surfaced the exact route before asking for
+                        confirmation.
+                        <div className="tao-demo__ok">Confirmed: 100 TAO routed into the selected subnet.</div>
+                      </div>
+                    </div>
+                    <div className="tao-demo__row tao-demo__row--user">
+                      <div className="tao-demo__bubble tao-demo__bubble--user">Move half of that position into Subnet 27.</div>
+                    </div>
+                    <div className="tao-demo__row">
+                      <div className="tao-demo__bubble tao-demo__bubble--bot">
+                        Rotation prepared on the same chain. Source route, destination route, and amount are all ready
+                        for review.
+                        <div className="tao-demo__ok">Moved: 50 TAO worth of Alpha into the new subnet route.</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="tao-demo__footer">
+                    <div className="tao-demo__input">
+                      Try: &quot;Unstake my Alpha from Netuid 310&quot; or &quot;What does Subnet 11 do?&quot;
+                    </div>
+                    <button type="button" className="tao-btn tao-btn--primary tao-demo__send" onClick={() => openApp()}>
+                      Send
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="tao-vision" id="vision">
+              <div>
+                <div className="tao-section-tag">Our vision</div>
+                <h2 className="tao-vision__title">
+                  DeFi on Bittensor should be
+                  <br />
+                  for <em>everyone.</em>
+                </h2>
+                <p className="tao-vision__copy">
+                  Bittensor is building the most important decentralised AI network in the world. Over 60 live
+                  subnets, each earning yield for stakers. But getting in has always required wallets, bridges,
+                  dashboards, and technical patience most people don&apos;t have.
+                </p>
+                <p className="tao-vision__copy">
+                  TaoChat makes it conversational. You tell it what you want in plain English and it handles the live
+                  Bittensor EVM flow cleanly, while upcoming external-chain routes stay clearly marked as coming soon.
+                </p>
+                <div className="tao-vision__points">
+                  {VISION_POINTS.map((point) => (
+                    <div key={point.title} className="tao-vision__point">
+                      <div className="tao-vision__icon">{point.icon}</div>
+                      <div>
+                        <h3>{point.title}</h3>
+                        <p>{point.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="tao-command-list">
+                {COMMAND_PREVIEWS.map((preview) => (
+                  <div key={preview.prompt} className="tao-command-card">
+                    <div className="tao-command-card__label">User says</div>
+                    <div className="tao-command-card__prompt">{preview.prompt}</div>
+                    <div className="tao-command-card__result">
+                      <span className="tao-command-card__result-dot" />
+                      {preview.result}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="tao-usecases" id="usecases">
+              <div className="tao-usecases__inner">
+                <div className="tao-usecases__header">
+                  <div className="tao-section-tag">What you can do</div>
+                  <h2 className="tao-section-title">Simple commands. Real outcomes.</h2>
+                </div>
+
+                <div className="tao-usecases__grid">
+                  {USE_CASES.map((item) => (
+                    <article key={item.id} className="tao-usecases__card">
+                      <div className="tao-usecases__index">{item.id}</div>
+                      <div className="tao-usecases__icon">{item.icon}</div>
+                      <h3>{item.title}</h3>
+                      <p>{item.description}</p>
+                      <div className="tao-usecases__example">
+                        &quot;<span>{item.example}</span>&quot;
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="tao-how" id="how">
+              <div className="tao-section-tag">Process</div>
+              <h2 className="tao-section-title">How TaoChat works</h2>
+
+              <div className="tao-how__steps">
+                {[
+                  {
+                    step: '1',
+                    title: 'Connect wallet',
+                    description: 'Link a wallet that supports the current Bittensor EVM flow.',
+                  },
+                  {
+                    step: '2',
+                    title: 'Say what you want',
+                    description: 'Type in plain English. No syntax, no commands to learn.',
+                  },
+                  {
+                    step: '3',
+                    title: 'Review & confirm',
+                    description: 'See exact amounts, fees, and simulated returns before anything moves.',
+                  },
+                  {
+                    step: '4',
+                    title: 'Done',
+                    description: 'Transaction confirmed on-chain. Every step logged in history.',
+                  },
+                ].map((item) => (
+                  <div key={item.step} className="tao-how__step">
+                    <div className="tao-how__step-number">{item.step}</div>
+                    <div className="tao-how__step-title">{item.title}</div>
+                    <div className="tao-how__step-copy">{item.description}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="tao-chains">
+              <div className="tao-chains__inner">
+                <div className="tao-section-tag">Supported networks</div>
+                <h2 className="tao-section-title">Stake from any chain</h2>
+
+                <div className="tao-chains__grid">
+                  {SUPPORTED_NETWORKS.map((network) => (
+                    <article key={network.name} className="tao-chains__card">
+                      <div className="tao-chains__icon" style={network.style}>
+                        {network.symbol}
+                      </div>
+                      <div className="tao-chains__name">{network.name}</div>
+                      <div className={network.status === 'Live' ? 'tao-chains__status' : 'tao-chains__status tao-chains__status--soon'}>
+                        {network.status === 'Live' ? '● Live' : 'Coming soon'}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="tao-cta">
+              <div className="tao-cta__inner">
+                <div className="tao-section-tag">Get started</div>
+                <h2 className="tao-cta__title">
+                  The simplest way to
+                  <br />
+                  earn on <em>Bittensor.</em>
+                </h2>
+                <p>Connect and make your first stake in under 60 seconds. No setup. No learning curve.</p>
+                <div className="tao-hero__actions">
+                  <button type="button" className="tao-btn tao-btn--primary tao-btn--large" onClick={() => openApp()}>
+                    Launch app →
+                  </button>
+                  <button type="button" className="tao-btn tao-btn--ghost tao-btn--large">
+                    Join Discord
+                  </button>
+                </div>
+              </div>
+            </section>
+          </main>
+
+          <footer className="tao-footer">
+            <div className="tao-logo tao-logo--small">
+              tao<b>chat</b>
+            </div>
+            <div className="tao-footer__links">
+              <a href="#">Docs</a>
+              <a href="#">Twitter</a>
+              <a href="#">Discord</a>
+              <a href="#">GitHub</a>
+              <a href="#">Terms</a>
+            </div>
+            <div className="tao-footer__copy">© 2025 TaoChat · Non-custodial · Open source</div>
+          </footer>
         </div>
-      </header>
+      ) : (
+        <div className="dashboard-shell">
+          <aside className="app-sidebar">
+            <button type="button" className="app-sidebar__brand" onClick={() => setAppView('chat')}>
+              <span className="tao-logo tao-logo--small">
+                tao<b>chat</b>
+              </span>
+            </button>
 
-      <main className={activeTab === 'chat' ? 'chat-container' : 'container'}>
-        {/* Page Title */}
-        {activeTab === 'staking' && (
-          <div style={{ marginBottom: '32px' }}>
-            <h1 style={{ fontSize: '28px', fontWeight: 700, letterSpacing: '-0.03em', marginBottom: '6px' }}>Staking <span className="text-accent-gradient">Dashboard</span></h1>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Stake TAO to earn Alpha on your chosen subnet.</p>
-          </div>
-        )}
+            <nav className="app-sidebar__nav">
+              <button
+                type="button"
+                className={`app-sidebar__nav-item ${appView === 'chat' ? 'is-active' : ''}`}
+                onClick={() => setAppView('chat')}
+              >
+                <span className="app-sidebar__icon">⌘</span>
+                Chat
+              </button>
+              <button
+                type="button"
+                className={`app-sidebar__nav-item ${appView === 'dashboard' ? 'is-active' : ''}`}
+                onClick={() => setAppView('dashboard')}
+              >
+                <span className="app-sidebar__icon">⇄</span>
+                Swap
+              </button>
+              <button
+                type="button"
+                className={`app-sidebar__nav-item ${appView === 'history' ? 'is-active' : ''}`}
+                onClick={() => {
+                  setAppView('history');
+                  void fetchOnchainHistory(account || undefined);
+                }}
+              >
+                <span className="app-sidebar__icon">☰</span>
+                History
+              </button>
+              <div className="app-sidebar__nav-item is-disabled">
+                <span className="app-sidebar__icon">⬡</span>
+                Research
+                <span className="soon-chip">Soon</span>
+              </div>
+            </nav>
 
-        {showStatusBanner && (
-          <div className="glass-panel" style={{
-            marginBottom: '24px',
-            padding: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            borderLeft: `4px solid ${status.type === 'error' ? 'var(--status-error)' : status.type === 'success' ? 'var(--status-success)' : 'var(--accent-primary)'}`
-          }}>
-            {status.type === 'error' ? <AlertCircle color="var(--status-error)" /> : <Activity color="var(--accent-primary)" />}
-            <span style={{ fontSize: '14px' }}>{status.msg}</span>
-          </div>
-        )}
+            <div className="app-sidebar__footer">
+              <button type="button" className="back-link" onClick={() => setSurface('landing')}>
+                ← Back to site
+              </button>
 
-        {activeTab === 'staking' ? (
-          <>
-            {account ? (
-              isWalletHydrating ? (
-                renderWalletHydrationSkeleton()
+              {account ? (
+                <>
+                  <div className="wpill">
+                    <div className="wdot" />
+                    <div className="waddr">{formatShortValue(account, 6, 4)}</div>
+                    <div className="wnet">EVM</div>
+                  </div>
+                  <button type="button" className="sidebar-disconnect" onClick={disconnectWallet}>
+                    Disconnect
+                  </button>
+                </>
               ) : (
-              <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '32px' }} className="stats-grid-3">
-                <div className="glass-panel" style={{ padding: '20px 24px' }}>
-                  <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>TAO Balance</p>
-                  <p className="mono" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{parseFloat(balance).toFixed(4)} <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>TAO</span></p>
-                </div>
-                <div className="glass-panel" style={{ padding: '20px 24px', borderColor: 'var(--border-highlight)' }}>
-                  <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>Your Alpha (Netuid {netuid})</p>
-                  <p className="mono text-accent-gradient" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{parseFloat(myAlphaBalance).toFixed(4)} <span style={{ fontSize: '13px', WebkitTextFillColor: 'var(--text-muted)', fontWeight: 400 }}>ALPHA</span></p>
-                </div>
-                <div className="glass-panel" style={{ padding: '20px 24px' }}>
-                  <p style={{ color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px', fontWeight: 500 }}>Global Hotkey (Netuid {CONFIG.DEFAULT_NETUID})</p>
-                  <p className="mono" style={{ fontSize: '26px', fontWeight: 600, letterSpacing: '-0.02em' }}>{parseFloat(totalAlphaStaked).toFixed(4)} <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 400 }}>ALPHA</span></p>
-                </div>
-              </div>
-              </>
-              )
-            ) : (
-              <div className="wallet-connect-shell">
-                <div className="wallet-connect-hero glass-panel">
-                  <div className="wallet-connect-hero__orbs">
-                    <span className="wallet-connect-hero__orb wallet-connect-hero__orb--primary" />
-                    <span className="wallet-connect-hero__orb wallet-connect-hero__orb--secondary" />
-                  </div>
-                  <div className="wallet-connect-hero__copy">
-                    <span className="wallet-connect-hero__eyebrow">Wallet Gateway</span>
-                    <h2>Choose a wallet, then stake into Alpha with a cleaner flow.</h2>
-                    <p>
-                      Connect your preferred provider to review balances, launch staking intents, and surface the validator
-                      routing for each Alpha position right in the dashboard.
-                    </p>
-                  </div>
-                  <div className="wallet-connect-grid">
-                    {WALLET_OPTIONS.map(renderWalletConnectCard)}
-                  </div>
-                </div>
-                <div className="wallet-connect-footnote">
-                  <span className="status-indicator"></span>
-                  <span>{CONFIG.NETWORK.chainName} • Chain ID {chainId}</span>
-                </div>
+                <button type="button" className="tao-btn tao-btn--primary tao-btn--small sidebar-connect" onClick={() => setShowWalletModal(true)}>
+                  Connect wallet
+                </button>
+              )}
+            </div>
+          </aside>
+
+          <section className="app-main">
+            {showStatusBanner && (
+              <div className={`status-banner status-banner--${status.type}`}>
+                {status.type === 'error' ? <AlertCircle size={16} /> : <Activity size={16} />}
+                <span>{status.msg}</span>
               </div>
             )}
 
-            {account && !isWalletHydrating && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '24px', alignItems: 'start' }} className="grid-cols-2">
-                {/* Unified Staking Engine Widget */}
-                <div className="glass-panel" style={{ padding: '28px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                    <ArrowRightLeft size={20} color="var(--accent-primary)" />
-                    <h3 style={{ margin: 0, fontWeight: 700, fontSize: '18px', letterSpacing: '-0.02em' }}>Staking Engine</h3>
-                  </div>
-                  <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
-                    Configure and execute Bittensor precompile staking operations atomically.
-                  </p>
-
-                  {/* Segmented controls / tabs */}
-                  <div style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', padding: '4px', borderRadius: '12px', border: '1px solid var(--border-subtle)', marginBottom: '24px' }}>
-                    <button
-                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'stake' ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))' : 'transparent', color: stakingAction === 'stake' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-                      onClick={() => setStakingAction('stake')}
-                    >
-                      <Activity size={14} /> Stake TAO
-                    </button>
-                    <button
-                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'swap' ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))' : 'transparent', color: stakingAction === 'swap' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-                      onClick={() => setStakingAction('swap')}
-                    >
-                      <ArrowRightLeft size={14} /> Swap Stake
-                    </button>
-                    <button
-                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: stakingAction === 'unstake' ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))' : 'transparent', color: stakingAction === 'unstake' ? 'white' : 'var(--text-muted)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-                      onClick={() => setStakingAction('unstake')}
-                    >
-                      <ArrowRightLeft size={14} /> Remove Stake
-                    </button>
-                  </div>
-
-                  {/* Dynamic Action Forms */}
-                  {stakingAction === 'stake' && (
-                    <div>
-                      <div style={{ marginBottom: '16px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                          <label className="text-sm" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Target Subnet (Netuid)</label>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            {[0, 1, 310].map((n) => (
-                              <span
-                                key={n}
-                                style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: netuid === n ? 'var(--accent-glow)' : 'rgba(255,255,255,0.03)', border: netuid === n ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)', cursor: 'pointer', color: netuid === n ? 'white' : 'var(--text-muted)', transition: 'all 0.15s ease' }}
-                                onClick={() => setNetuid(n)}
-                              >
-                                Netuid {n}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <input type="number" className="input-field" value={netuid} onChange={(e) => setNetuid(Number(e.target.value))} />
-                      </div>
-                      <div style={{ marginBottom: '24px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                          <label className="text-sm" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>TAO</span></label>
-                          {account && (
-                            <span
-                              className="text-xs text-accent"
-                              style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--accent-secondary)', fontWeight: 500 }}
-                              onClick={() => setStakeAmount(balance)}
-                            >
-                              Available: {parseFloat(balance).toFixed(4)} TAO (Max)
-                            </span>
-                          )}
-                        </div>
-                        <input type="number" className="input-field" placeholder="0.00" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} />
-                      </div>
-                      <button className="btn btn-primary" style={{ width: '100%', padding: '13px' }} disabled={!account || !stakeAmount || status.type === 'loading'} onClick={handleBuyAlpha}>
-                        <Activity size={16} /> Stake TAO
-                      </button>
-                    </div>
-                  )}
-
-                  {stakingAction === 'swap' && (
-                    <div>
-                      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-                        <div style={{ flex: 1 }}>
-                          <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontWeight: 500 }}>Source Netuid</label>
-                          <input type="number" className="input-field" value={swapSourceNetuid} onChange={(e) => setSwapSourceNetuid(Number(e.target.value))} />
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <label className="text-sm" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontWeight: 500 }}>Target Netuid</label>
-                          <input type="number" className="input-field" value={swapTargetNetuid} onChange={(e) => setSwapTargetNetuid(Number(e.target.value))} />
-                        </div>
-                      </div>
-
-                      <div style={{ marginBottom: '24px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                          <label className="text-sm" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
-                            Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span>
-                          </label>
-                          {account && (
-                            <span
-                              className="text-xs text-accent"
-                              style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--accent-secondary)', fontWeight: 500 }}
-                              onClick={() => setSwapAmount(allAlphaBalances[swapSourceNetuid] || '0')}
-                            >
-                              Max: {allAlphaBalances[swapSourceNetuid] ? parseFloat(allAlphaBalances[swapSourceNetuid]).toFixed(4) : '0.0000'}
-                            </span>
-                          )}
-                        </div>
-                        <input
-                          type="number"
-                          className="input-field"
-                          placeholder={allAlphaBalances[swapSourceNetuid] && parseFloat(allAlphaBalances[swapSourceNetuid]) > 0 ? `Max: ${parseFloat(allAlphaBalances[swapSourceNetuid]).toFixed(4)}` : "0.00"}
-                          value={swapAmount}
-                          onChange={(e) => setSwapAmount(e.target.value)}
-                        />
-                      </div>
-
-                      <button
-                        className="btn btn-primary"
-                        style={{ width: '100%', padding: '13px' }}
-                        disabled={!account || status.type === 'loading' || (swapAmount === '' && (!allAlphaBalances[swapSourceNetuid] || parseFloat(allAlphaBalances[swapSourceNetuid]) === 0))}
-                        onClick={handleSwap}
-                      >
-                        <ArrowRightLeft size={16} /> {swapAmount ? 'Swap Stake' : 'Swap All Alpha'}
-                      </button>
-                    </div>
-                  )}
-
-                  {stakingAction === 'unstake' && (
-                    <div>
-                      <div style={{ marginBottom: '16px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                          <label className="text-sm" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Subnet (Netuid)</label>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            {[0, 1, 310].map((n) => (
-                              <span
-                                key={n}
-                                style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: unstakeNetuid === n ? 'var(--accent-glow)' : 'rgba(255,255,255,0.03)', border: unstakeNetuid === n ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)', cursor: 'pointer', color: unstakeNetuid === n ? 'white' : 'var(--text-muted)', transition: 'all 0.15s ease' }}
-                                onClick={() => setUnstakeNetuid(n)}
-                              >
-                                Netuid {n}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <input type="number" className="input-field" value={unstakeNetuid} onChange={(e) => setUnstakeNetuid(Number(e.target.value))} />
-                      </div>
-                      <div style={{ marginBottom: '24px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                          <label className="text-sm" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Amount <span style={{ color: 'var(--accent-secondary)' }}>ALPHA</span></label>
-                          {account && (
-                            <span
-                              className="text-xs text-accent"
-                              style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--accent-secondary)', fontWeight: 500 }}
-                              onClick={() => setUnstakeAmount(allAlphaBalances[unstakeNetuid] || '0')}
-                            >
-                              Max: {allAlphaBalances[unstakeNetuid] ? parseFloat(allAlphaBalances[unstakeNetuid]).toFixed(4) : '0.0000'}
-                            </span>
-                          )}
-                        </div>
-                        <input type="number" className="input-field" placeholder={allAlphaBalances[unstakeNetuid] ? `Max: ${parseFloat(allAlphaBalances[unstakeNetuid]).toFixed(4)}` : "0.00"} value={unstakeAmount} onChange={(e) => setUnstakeAmount(e.target.value)} />
-                      </div>
-
-                      <div style={{ marginBottom: '24px', padding: '14px', background: 'var(--accent-glow-subtle)', borderRadius: '10px', border: '1px solid var(--border-highlight)' }}>
-                        <p className="text-sm" style={{ color: 'var(--accent-primary)', marginBottom: '4px', fontWeight: 500 }}>How it works</p>
-                        <p className="text-sm" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Burns Alpha and atomically returns native TAO to your wallet via the staking precompile.</p>
-                      </div>
-
-                      <button className="btn btn-secondary" style={{ width: '100%', padding: '13px' }} disabled={!account || status.type === 'loading' || !(allAlphaBalances[unstakeNetuid] && parseFloat(allAlphaBalances[unstakeNetuid]) > 0)} onClick={handleUnstake}>
-                        <ArrowRightLeft size={16} /> {unstakeAmount ? 'Unstake Alpha' : 'Unstake All Alpha'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* My Subnet Positions List Card (Right Column) */}
-                <div className="glass-panel" style={{ padding: '28px', minHeight: '390px', display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                    <Activity size={20} color="var(--accent-secondary)" />
-                    <h3 style={{ margin: 0, fontWeight: 700, fontSize: '18px', letterSpacing: '-0.02em' }}>Staking Positions</h3>
-                  </div>
-                  <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
-                    Your current on-chain stakes and validator routes. Click any position to load it into the form.
-                  </p>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
-                    {activePositions.length > 0 ? (
-                      activePositions
-                        .map(([id, bal]) => {
-                          const net = Number(id);
-                          const validatorHotkey = stakedHotkeys[net] || '';
-                          const isCurrent = (stakingAction === 'stake' && netuid === net) ||
-                            (stakingAction === 'unstake' && unstakeNetuid === net) ||
-                            (stakingAction === 'swap' && swapSourceNetuid === net);
-                          return (
-                            <div
-                              key={id}
-                              style={{
-                                padding: '16px',
-                                borderRadius: '12px',
-                                background: isCurrent ? 'var(--accent-glow-subtle)' : 'rgba(255, 255, 255, 0.02)',
-                                border: isCurrent ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s ease',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                boxShadow: isCurrent ? '0 0 16px var(--accent-glow)' : 'none'
-                              }}
-                              onClick={() => handlePositionClick(net)}
-                              onMouseEnter={(e) => {
-                                if (!isCurrent) {
-                                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                if (!isCurrent) {
-                                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
-                                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
-                                }
-                              }}
-                            >
-                              <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                  <span style={{ fontSize: '14px', fontWeight: 600, color: 'white' }}>
-                                    {getSubnetLabel(net)}
-                                  </span>
-                                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)', fontFamily: 'var(--font-mono)' }}>
-                                    Netuid {net}
-                                  </span>
-                                </div>
-                                <div className="position-validator-line" title={validatorHotkey || 'Validator hotkey is still syncing'}>
-                                  <span className="position-validator-line__label">Validator</span>
-                                  <span className="mono position-validator-line__value">
-                                    {validatorHotkey ? formatShortValue(validatorHotkey, 8, 6) : 'Syncing…'}
-                                  </span>
-                                </div>
-                              </div>
-                              <div style={{ textAlign: 'right' }}>
-                                <span className="mono" style={{ fontSize: '16px', fontWeight: 600, color: 'var(--accent-secondary)' }}>
-                                  {parseFloat(bal).toFixed(4)}
-                                </span>
-                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginLeft: '4px' }}>
-                                  ALPHA
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })
-                    ) : (
-                      <div style={{ padding: '32px', textAlign: 'center', borderRadius: '12px', border: '1px dashed var(--border-subtle)', background: 'rgba(255,255,255,0.01)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-                        <Activity size={32} style={{ color: 'var(--text-muted)', marginBottom: '12px', opacity: 0.3 }} />
-                        <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>No active staking positions</p>
-                        <p style={{ fontSize: '11px', color: 'var(--text-muted)', opacity: 0.7, marginTop: '4px' }}>Stake TAO above to get started</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+            {appView === 'dashboard' && renderDashboardView()}
+            {appView === 'history' && renderHistoryView()}
+            {appView === 'chat' && (
+              <ChatPortal
+                account={account}
+                balance={balance}
+                myAlphaBalance={myAlphaBalance}
+                allAlphaBalances={allAlphaBalances}
+                currentNetuid={netuid}
+                executeStake={executeStake}
+                executeUnstake={executeUnstake}
+                executeSwap={executeSwap}
+                status={status}
+                openWalletSelector={() => setShowWalletModal(true)}
+                disconnectWallet={disconnectWallet}
+              />
             )}
-
-            {/* Transaction History */}
-            {account && stakeHistory.length > 0 && (
-              <div className="glass-panel" style={{ padding: '24px', marginTop: '32px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-                  <History size={18} color="var(--accent-secondary)" />
-                  <h3 style={{ margin: 0 }}>Transaction History</h3>
-                </div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                        <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Type</th>
-                        <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Netuid</th>
-                        <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>TAO</th>
-                        <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Alpha</th>
-                        <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Block</th>
-                        <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)', fontWeight: 500 }}>Tx</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {stakeHistory.map((ev, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                          <td style={{ padding: '10px 12px' }}>
-                            <span style={{
-                              padding: '2px 8px',
-                              borderRadius: '8px',
-                              border: '1px solid var(--border-subtle)',
-                              background: ev.type === 'stake' ? 'rgba(0,255,136,0.1)' : 'rgba(255,51,102,0.1)',
-                              color: ev.type === 'stake' ? 'var(--status-success)' : 'var(--status-error)',
-                              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)'
-                            }}>
-                              {ev.type === 'stake' ? 'STAKE' : 'UNSTAKE'}
-                            </span>
-                          </td>
-                          <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono">{ev.netuid}</td>
-                          <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono">{ev.taoAmount}</td>
-                          <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono">{ev.alphaAmount}</td>
-                          <td style={{ textAlign: 'right', padding: '10px 12px' }} className="mono text-muted">{ev.blockNumber}</td>
-                          <td style={{ textAlign: 'right', padding: '10px 12px' }}>
-                            <a
-                              href={`https://evm-testnet.subtensor.io/tx/${ev.txHash}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mono text-accent"
-                              style={{ fontSize: '11px', textDecoration: 'none' }}
-                            >
-                              {ev.txHash.substring(0, 10)}...
-                            </a>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          <ChatPortal
-            account={account}
-            balance={balance}
-            myAlphaBalance={myAlphaBalance}
-            allAlphaBalances={allAlphaBalances}
-            currentNetuid={netuid}
-            executeStake={executeStake}
-            executeUnstake={executeUnstake}
-            executeSwap={executeSwap}
-            status={status}
-            openWalletSelector={() => setShowWalletModal(true)}
-          />
-        )}
-      </main>
+          </section>
+        </div>
+      )}
 
       {showWalletModal && (
         <div className="wallet-modal-backdrop" onClick={() => setShowWalletModal(false)}>
-          <div
-            className="glass-panel wallet-modal-card"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="wallet-modal-card" onClick={(event) => event.stopPropagation()}>
             <div className="wallet-modal-card__header">
-              <h3 style={{ fontSize: '20px', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>Connect Wallet</h3>
-              <button
-                className="wallet-modal-card__close"
-                onClick={() => setShowWalletModal(false)}
-              >
-                &times;
+              <div>
+                <span className="section-kicker">Connect wallet</span>
+                <h3>Choose your wallet provider</h3>
+              </div>
+              <button type="button" className="wallet-modal-card__close" onClick={() => setShowWalletModal(false)}>
+                ×
               </button>
             </div>
-            
-            <p style={{ color: 'var(--text-secondary)', fontSize: '13.5px', marginBottom: '24px', lineHeight: 1.5 }}>
-              Select a wallet provider to securely authenticate and execute staking precompile intents.
+
+            <p className="wallet-modal-card__copy">
+              This build is focused on Bittensor subEVM staking. Cross-chain routing remains clearly marked as coming
+              soon until it is actually live.
             </p>
 
-            <div className="wallet-modal-card__options">
-              {WALLET_OPTIONS.map(renderWalletModalOption)}
-            </div>
+            {Boolean(status.msg) && (
+              <div className={`status-banner status-banner--${status.type === 'idle' ? 'loading' : status.type}`}>
+                {status.type === 'error' ? <AlertCircle size={16} /> : <Activity size={16} />}
+                <span>{status.msg}</span>
+              </div>
+            )}
+
+            <div className="wallet-modal-card__options">{WALLET_OPTIONS.map(renderWalletModalOption)}</div>
           </div>
         </div>
       )}
