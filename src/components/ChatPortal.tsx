@@ -11,6 +11,11 @@ interface ChatPortalProps {
   allAlphaBalances: { [id: number]: string };
   currentNetuid: number;
   simulateStakeAlpha: (amount: string, netuid: number) => Promise<string | null>;
+  simulateSwapAlpha: (
+    sourceNetuid: number,
+    targetNetuid: number,
+    amount: string,
+  ) => Promise<{ targetAlpha: string; intermediateTao: string } | null>;
   executeStake: (amount: string, netuid: number) => Promise<boolean>;
   executeUnstake: (netuid: number, amount?: string) => Promise<boolean>;
   executeSwap: (sourceNetuid: number, targetNetuid: number, amount: string) => Promise<boolean>;
@@ -82,12 +87,13 @@ interface ChatMessage {
     netuid: number;
     targetNetuid?: number;
     estimatedAlpha?: string;
+    intermediateTao?: string;
   };
 }
 
 const QUICK_PROMPTS = [
   'Stake 100 TAO on the best subnet',
-  'Move half my Subnet 310 position to Subnet 19',
+  'Move 0.03 ALPHA from Subnet 310 to Subnet 395',
   'Unstake my Subnet 19 position',
   'What is Subnet 27?',
 ];
@@ -95,7 +101,7 @@ const QUICK_PROMPTS = [
 const INPUT_HINTS = [
   { label: '↑ Stake', prompt: 'Stake 50 TAO on Subnet 19' },
   { label: '↓ Unstake', prompt: 'Unstake my Subnet 27 position' },
-  { label: '⇄ Move', prompt: 'Move 2 ALPHA from Subnet 310 to Subnet 19' },
+  { label: '⇄ Move', prompt: 'Move 0.03 ALPHA from Subnet 310 to Subnet 395' },
   { label: '↗ Top subnet', prompt: 'What is the top subnet right now?' },
   { label: '⬡ Research', prompt: 'What does Subnet 4 do?' },
 ];
@@ -107,6 +113,7 @@ export default function ChatPortal({
   allAlphaBalances,
   currentNetuid,
   simulateStakeAlpha,
+  simulateSwapAlpha,
   executeStake,
   executeUnstake,
   executeSwap,
@@ -259,7 +266,16 @@ export default function ChatPortal({
           };
           const alphaOnSource = Number.parseFloat(allAlphaBalances[sourceNetuid] || '0');
 
-          if (alphaOnSource < Number.parseFloat(amount)) {
+          if (sourceNetuid === targetNetuid) {
+            const functionResponse = {
+              name: call.name,
+              response: {
+                error: 'Source and destination netuid must be different for a subnet rotation.',
+              },
+            };
+            const nextResult = await chatSession.sendMessage([{ functionResponse }]);
+            await processResponse(nextResult);
+          } else if (alphaOnSource < Number.parseFloat(amount)) {
             const functionResponse = {
               name: call.name,
               response: {
@@ -269,12 +285,23 @@ export default function ChatPortal({
             const nextResult = await chatSession.sendMessage([{ functionResponse }]);
             await processResponse(nextResult);
           } else {
+            const simulation = await simulateSwapAlpha(sourceNetuid, targetNetuid, amount);
+
             setMessages((prev) => [
               ...prev,
               {
                 role: 'model',
-                text: `I prepared a subnet rotation for ${amount} Alpha from Netuid ${sourceNetuid} to Netuid ${targetNetuid}.`,
-                action: { type: 'swap', netuid: sourceNetuid, targetNetuid, amount },
+                text: simulation
+                  ? `I prepared a subnet rotation: move ${amount} ALPHA from Netuid ${sourceNetuid} to Netuid ${targetNetuid}. Simulation estimates about ${formatTokenAmount(simulation.targetAlpha)} ALPHA on the destination.`
+                  : `I prepared a subnet rotation: move ${amount} ALPHA from Netuid ${sourceNetuid} to Netuid ${targetNetuid}. Review it below and confirm when you are ready.`,
+                action: {
+                  type: 'swap',
+                  netuid: sourceNetuid,
+                  targetNetuid,
+                  amount,
+                  estimatedAlpha: simulation?.targetAlpha,
+                  intermediateTao: simulation?.intermediateTao,
+                },
               },
             ]);
           }
@@ -471,6 +498,20 @@ export default function ChatPortal({
                           <span className="trow-k">To</span>
                           <span className="trow-v trow-vo">Netuid {message.action.targetNetuid}</span>
                         </div>
+                        <div className="trow">
+                          <span className="trow-k">Estimated receive</span>
+                          <span className="trow-v trow-vg">
+                            {message.action.estimatedAlpha
+                              ? `≈${formatTokenAmount(message.action.estimatedAlpha)} ALPHA`
+                              : 'Simulation unavailable'}
+                          </span>
+                        </div>
+                        {message.action.intermediateTao && (
+                          <div className="trow">
+                            <span className="trow-k">Route value</span>
+                            <span className="trow-v">via ≈{formatTokenAmount(message.action.intermediateTao)} TAO</span>
+                          </div>
+                        )}
                       </>
                     )}
                   </div>

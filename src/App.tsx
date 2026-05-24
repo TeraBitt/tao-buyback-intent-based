@@ -76,6 +76,11 @@ interface SubnetCatalogEntry {
   name: string;
 }
 
+interface SwapAlphaSimulation {
+  targetAlpha: string;
+  intermediateTao: string;
+}
+
 interface SubnetPresentation {
   netuid: number;
   code: string;
@@ -108,19 +113,19 @@ const WALLET_OPTIONS: WalletOption[] = [
 ];
 
 const LANDING_TICKER = [
-  { label: 'SN19 Vision', value: '34.2% APY', delta: '↑ 2.1%', positive: true },
-  { label: 'SN27 Inference', value: '28.6% APY', delta: '↑ 0.8%', positive: true },
-  { label: 'SN11 Code', value: '22.3% APY', delta: '↑ 3.4%', positive: true },
-  { label: 'SN4 Multimodal', value: '19.1% APY', delta: '↓ 0.4%', positive: false },
-  { label: 'SN9 Translation', value: '16.4% APY', delta: '↑ 1.2%', positive: true },
+  { label: 'SN19 Vision', value: '34.2% Est. APY', delta: '↑ 2.1%', positive: true },
+  { label: 'SN27 Inference', value: '28.6% Est. APY', delta: '↑ 0.8%', positive: true },
+  { label: 'SN11 Code', value: '22.3% Est. APY', delta: '↑ 3.4%', positive: true },
+  { label: 'SN4 Multimodal', value: '19.1% Est. APY', delta: '↓ 0.4%', positive: false },
+  { label: 'SN9 Translation', value: '16.4% Est. APY', delta: '↑ 1.2%', positive: true },
   { label: 'TAO/USD', value: '$487.20', delta: '↑ 4.1%', positive: true },
-  { label: 'SN1 Text', value: '14.8% APY', delta: '↓ 0.2%', positive: false },
+  { label: 'SN1 Text', value: '14.8% Est. APY', delta: '↓ 0.2%', positive: false },
 ];
 
 const COMMAND_PREVIEWS = [
   {
     prompt: '"Stake 200 TAO on the top AI subnet this week"',
-    result: '200 TAO staked on SN27 at 28.6% APY · confirmed',
+    result: '200 TAO staked on SN27 at est. 28.6% APY · confirmed',
   },
   {
     prompt: '"Move half my position from Subnet 310 into Subnet 19"',
@@ -132,7 +137,7 @@ const COMMAND_PREVIEWS = [
   },
   {
     prompt: '"What does Subnet 27 do and how is it performing?"',
-    result: 'Full subnet breakdown shown · live APY, TVL, validator count',
+    result: 'Full subnet breakdown shown · estimated APY, TVL, validator count',
   },
 ];
 
@@ -187,8 +192,8 @@ const USE_CASES = [
     icon: '↗',
     title: 'Discover top subnets',
     description:
-      'Ask which subnets lead by APY, category, or momentum. Get live data and act on it instantly.',
-    example: 'Which AI subnet has the best APY?',
+      'Ask which subnets lead by estimated APY, category, or momentum. Get live data and act on it instantly.',
+    example: 'Which AI subnet has the highest estimated APY?',
   },
   {
     id: '05',
@@ -203,7 +208,7 @@ const USE_CASES = [
     icon: '⬡',
     title: 'Research any subnet',
     description:
-      'Ask what a subnet does, its live APY, TVL, validator count, and how it compares to similar ones.',
+      'Ask what a subnet does, its estimated APY, TVL, validator count, and how it compares to similar ones.',
     example: 'What does Subnet 11 do?',
   },
 ];
@@ -291,6 +296,8 @@ const formatHistoryTime = (timestamp: number) => {
 
 const getSubnetMeta = (targetNetuid: number) =>
   DISPLAY_SUBNETS.find((subnet) => subnet.netuid === targetNetuid) ?? null;
+
+const APY_LABEL = 'Est. APY';
 
 const getMockApyForNetuid = (targetNetuid: number) => {
   const subnetMeta = getSubnetMeta(targetNetuid);
@@ -634,21 +641,26 @@ const decodeSubnetCatalog = (scaleBytes: unknown): SubnetCatalogEntry[] => {
   }
 };
 
-const decodeSimSwapAlphaAmount = (scaleBytes: unknown) => {
-  const bytes = bytesFromScaleResult(scaleBytes);
-  if (!bytes || bytes.length < 16) return null;
+const decodeSimSwapOutputRao = (bytes: Uint8Array | null, byteOffset: number) => {
+  if (!bytes || bytes.length < byteOffset + 8) return null;
 
   try {
-    let alphaAmountRao = 0n;
+    let amountRao = 0n;
     for (let index = 0; index < 8; index += 1) {
-      alphaAmountRao |= BigInt(bytes[8 + index]) << BigInt(index * 8);
+      amountRao |= BigInt(bytes[byteOffset + index]) << BigInt(index * 8);
     }
 
-    return ethers.formatUnits(alphaAmountRao, 9);
+    return amountRao;
   } catch (error) {
-    console.error('Failed to decode simulated ALPHA output:', error);
+    console.error('Failed to decode simulated swap output:', error);
     return null;
   }
+};
+
+const decodeSimSwapAlphaAmount = (scaleBytes: unknown) => {
+  const bytes = bytesFromScaleResult(scaleBytes);
+  const alphaAmountRao = decodeSimSwapOutputRao(bytes, 8);
+  return alphaAmountRao === null ? null : ethers.formatUnits(alphaAmountRao, 9);
 };
 
 const getTimestampFromNonce = (nonce?: string) => {
@@ -843,6 +855,8 @@ function App() {
   const [swapAmount, setSwapAmount] = useState('');
   const [swapSourceNetuid, setSwapSourceNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
   const [swapTargetNetuid, setSwapTargetNetuid] = useState<number>(19);
+  const [swapAlphaEstimate, setSwapAlphaEstimate] = useState<SwapAlphaSimulation | null>(null);
+  const [isSwapEstimateLoading, setIsSwapEstimateLoading] = useState(false);
   const [destinationPage, setDestinationPage] = useState(1);
   const [subnetSearchQuery, setSubnetSearchQuery] = useState('');
 
@@ -986,6 +1000,61 @@ function App() {
       return decodeSimSwapAlphaAmount(simulation);
     } catch (error) {
       console.error('Failed to simulate stake output:', error);
+      return null;
+    }
+  };
+
+  const simulateSwapAlpha = async (
+    sourceNetuid: number,
+    targetNetuid: number,
+    amount: string,
+  ): Promise<SwapAlphaSimulation | null> => {
+    const numericAmount = Number.parseFloat(amount);
+    if (
+      !Number.isFinite(numericAmount) ||
+      numericAmount <= 0 ||
+      sourceNetuid < 0 ||
+      targetNetuid < 0 ||
+      sourceNetuid === targetNetuid
+    ) {
+      return null;
+    }
+
+    try {
+      const amountInRao = ethers.parseUnits(amount, 9);
+      const amountParam = Number(amountInRao);
+
+      if (!Number.isSafeInteger(amountParam) || amountParam <= 0) {
+        return null;
+      }
+
+      const taoSimulation = await withRpcBackoff(() =>
+        directProvider.send('swap_simSwapAlphaForTao', [sourceNetuid, amountParam]),
+      );
+      const taoRao = decodeSimSwapOutputRao(bytesFromScaleResult(taoSimulation), 0);
+      if (taoRao === null || taoRao <= 0n) {
+        return null;
+      }
+
+      const taoParam = Number(taoRao);
+      if (!Number.isSafeInteger(taoParam) || taoParam <= 0) {
+        return null;
+      }
+
+      const alphaSimulation = await withRpcBackoff(() =>
+        directProvider.send('swap_simSwapTaoForAlpha', [targetNetuid, taoParam]),
+      );
+      const targetAlphaRao = decodeSimSwapOutputRao(bytesFromScaleResult(alphaSimulation), 8);
+      if (targetAlphaRao === null) {
+        return null;
+      }
+
+      return {
+        targetAlpha: ethers.formatUnits(targetAlphaRao, 9),
+        intermediateTao: ethers.formatUnits(taoRao, 9),
+      };
+    } catch (error) {
+      console.error('Failed to simulate subnet rotation:', error);
       return null;
     }
   };
@@ -1293,6 +1362,19 @@ function App() {
   }, [stakingAction, availableNetuids.length, subnetSearchQuery]);
 
   useEffect(() => {
+    if (swapSourceNetuid !== swapTargetNetuid) return;
+
+    const fallbackTarget = [
+      ...DISPLAY_SUBNETS.map((subnet) => subnet.netuid),
+      ...availableNetuids,
+    ].find((candidateNetuid) => candidateNetuid > 0 && candidateNetuid !== swapSourceNetuid);
+
+    if (fallbackTarget !== undefined) {
+      setSwapTargetNetuid(fallbackTarget);
+    }
+  }, [swapSourceNetuid, swapTargetNetuid, availableNetuids]);
+
+  useEffect(() => {
     if (surface !== 'app' || appView !== 'dashboard' || stakingAction !== 'stake' || !stakeAmount) {
       setStakeAlphaEstimate(null);
       setIsStakeEstimateLoading(false);
@@ -1317,6 +1399,39 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stakeAmount, netuid, stakingAction, surface, appView]);
 
+  useEffect(() => {
+    const amountToQuote = swapAmount || allAlphaBalances[swapSourceNetuid] || '';
+
+    if (
+      surface !== 'app' ||
+      appView !== 'dashboard' ||
+      stakingAction !== 'swap' ||
+      !amountToQuote ||
+      swapSourceNetuid === swapTargetNetuid
+    ) {
+      setSwapAlphaEstimate(null);
+      setIsSwapEstimateLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setIsSwapEstimateLoading(true);
+
+    const timer = window.setTimeout(() => {
+      void simulateSwapAlpha(swapSourceNetuid, swapTargetNetuid, amountToQuote).then((estimate) => {
+        if (cancelled) return;
+        setSwapAlphaEstimate(estimate);
+        setIsSwapEstimateLoading(false);
+      });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [swapAmount, swapSourceNetuid, swapTargetNetuid, stakingAction, surface, appView, allAlphaBalances]);
+
   const clearWalletState = () => {
     setIsWalletHydrating(false);
     setIsHistoryLoading(false);
@@ -1334,6 +1449,8 @@ function App() {
     setStakedHotkeys({});
     setStakeAlphaEstimate(null);
     setIsStakeEstimateLoading(false);
+    setSwapAlphaEstimate(null);
+    setIsSwapEstimateLoading(false);
     setSubnetNamesByNetuid({});
     setAvailableNetuids(DISPLAY_SUBNETS.map((subnet) => subnet.netuid));
     setDestinationPage(1);
@@ -1488,6 +1605,20 @@ function App() {
       };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!status.msg || status.type === 'loading') return undefined;
+
+    const timer = window.setTimeout(() => {
+      setStatus((currentStatus) =>
+        currentStatus.msg === status.msg && currentStatus.type === status.type
+          ? { type: 'idle', msg: '' }
+          : currentStatus,
+      );
+    }, 8000);
+
+    return () => window.clearTimeout(timer);
+  }, [status.msg, status.type]);
 
   const signAndExecuteIntent = async (
     calls: IntentCall[],
@@ -1861,6 +1992,10 @@ function App() {
       setStatus({ type: 'error', msg: 'Please enter a valid amount of ALPHA to move.' });
       return;
     }
+    if (swapSourceNetuid === swapTargetNetuid) {
+      setStatus({ type: 'error', msg: 'Choose a different destination subnet for the move.' });
+      return;
+    }
 
     const hotkey = stakedHotkeys[swapSourceNetuid] || getHotkeyForNetuid(swapSourceNetuid);
     if (await executeSwap(swapSourceNetuid, swapTargetNetuid, hotkey, amountToSwap)) {
@@ -1897,6 +2032,20 @@ function App() {
     })
     .sort((left, right) => Number.parseFloat(right.amount) - Number.parseFloat(left.amount));
   const stakingPositionsByNetuid = new Map(stakingPositions.map((position) => [position.netuid, position]));
+
+  useEffect(() => {
+    if (stakingAction !== 'swap' || activePositions.length === 0) return;
+
+    const sourceStillAvailable = activePositions.some(([id]) => Number(id) === swapSourceNetuid);
+    if (!sourceStillAvailable) {
+      const nextSourceNetuid = activePositions[0]?.[0];
+      if (nextSourceNetuid !== undefined) {
+        setSwapSourceNetuid(Number(nextSourceNetuid));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stakingAction, swapSourceNetuid, allAlphaBalances]);
+
   const hasSubnetCatalog = Object.keys(subnetNamesByNetuid).length > 0;
   const getUiSubnetPresentation = (targetNetuid: number): SubnetPresentation => {
     const presentation = getSubnetPresentation(targetNetuid);
@@ -1921,6 +2070,26 @@ function App() {
       ? WALLET_OPTIONS.find((option) => status.msg.toLowerCase().includes(option.label.toLowerCase()))?.id ?? null
       : null;
   const showStatusBanner = Boolean(status.msg) && !(status.type === 'loading' && (!account || isWalletHydrating));
+  const dismissStatusToast = () => setStatus({ type: 'idle', msg: '' });
+  const renderStatusToast = (toastStatus: StatusState = status) => {
+    const toastType = toastStatus.type === 'idle' ? 'loading' : toastStatus.type;
+
+    return (
+      <div
+        className={`status-banner status-banner--${toastType}`}
+        role={toastType === 'error' ? 'alert' : 'status'}
+        aria-live={toastType === 'error' ? 'assertive' : 'polite'}
+      >
+        {toastType === 'error' ? <AlertCircle size={16} /> : <Activity size={16} />}
+        <span className="status-banner__message">{toastStatus.msg}</span>
+        {toastType !== 'loading' && (
+          <button type="button" className="status-banner__close" onClick={dismissStatusToast} aria-label="Dismiss notification">
+            <X size={15} />
+          </button>
+        )}
+      </div>
+    );
+  };
   const combinedHistory = mergeHistoryEvents(stakeHistory, sessionStakeHistory);
   const filteredHistory =
     historyFilter === 'all' ? combinedHistory : combinedHistory.filter((event) => event.type === historyFilter);
@@ -2026,6 +2195,7 @@ function App() {
 
     const stakeAmountValue = Number.parseFloat(stakeAmount || '0');
     const swapAmountValue = Number.parseFloat(swapAmount || allAlphaBalances[swapSourceNetuid] || '0');
+    const swapTargetAmountValue = Number.parseFloat(swapAlphaEstimate?.targetAlpha ?? String(swapAmountValue));
     const unstakeAmountValue = Number.parseFloat(unstakeAmount || allAlphaBalances[unstakeNetuid] || '0');
     const selectedApy = Number.parseFloat(
       (stakingAction === 'stake'
@@ -2036,11 +2206,12 @@ function App() {
       ).replace('%', ''),
     );
     const simulationBase =
-      stakingAction === 'stake' ? stakeAmountValue : stakingAction === 'swap' ? swapAmountValue : unstakeAmountValue;
+      stakingAction === 'stake' ? stakeAmountValue : stakingAction === 'swap' ? swapTargetAmountValue : unstakeAmountValue;
     const thirtyDayReturn = (simulationBase * selectedApy) / 12 / 100;
     const ninetyDayReturn = (simulationBase * selectedApy) / 4 / 100;
     const yearlyReturn = (simulationBase * selectedApy) / 100;
     const activeSwapSources = activePositions.length > 0 ? activePositions : [['310', allAlphaBalances[310] || '0']];
+    const activeUnstakeSources = activePositions.length > 0 ? activePositions : [[String(unstakeNetuid), allAlphaBalances[unstakeNetuid] || '0']];
     const scannedNetuids = [...availableNetuids]
       .filter((targetNetuid) => targetNetuid > 0)
       .sort((left, right) => left - right);
@@ -2053,9 +2224,13 @@ function App() {
     );
     const sidePanelShowsCurrentPositions =
       stakingAction === 'unstake' || (stakingAction === 'stake' && stakingPositions.length > 0);
-    const sidePanelRouteNetuids = sidePanelShowsCurrentPositions
-      ? stakingPositions.map((position) => position.netuid)
-      : destinationNetuids;
+    const swapDestinationNetuids = destinationNetuids.filter((targetNetuid) => targetNetuid !== swapSourceNetuid);
+    const sidePanelRouteNetuids =
+      stakingAction === 'swap'
+        ? swapDestinationNetuids
+        : sidePanelShowsCurrentPositions
+          ? stakingPositions.map((position) => position.netuid)
+          : destinationNetuids;
     const normalizedSubnetSearch = subnetSearchQuery.trim().toLowerCase();
     const filteredSidePanelRouteNetuids = normalizedSubnetSearch
       ? sidePanelRouteNetuids.filter((displayNetuid) => {
@@ -2085,10 +2260,11 @@ function App() {
         );
     const sidePanelTitle =
       stakingAction === 'swap'
-        ? 'Testnet destination'
+        ? 'Move preview'
         : sidePanelShowsCurrentPositions
           ? 'Current positions'
           : 'Testnet destination';
+    const selectedSwapSourceBalance = formatTokenAmount(allAlphaBalances[swapSourceNetuid] || '0');
 
     return (
       <div className="swap-wrap">
@@ -2134,27 +2310,9 @@ function App() {
                   : stakingAction === 'swap'
                     ? 'Move stake'
                     : 'Unstake ALPHA'}
-              </div>
-              <div className="scard-body">
-                {stakingAction === 'swap' && (
-                  <div className="swap-source-picker">
-                    <div className="swap-source-picker__label">Source route</div>
-                    <div className="swap-source-picker__row">
-                      {activeSwapSources.map(([id, bal]) => (
-                        <button
-                          key={id}
-                          type="button"
-                          className={`swap-source-pill ${swapSourceNetuid === Number(id) ? 'is-active' : ''}`}
-                          onClick={() => setSwapSourceNetuid(Number(id))}
-                        >
-                          {getUiSubnetLabel(Number(id))} · {formatTokenAmount(bal)} ALPHA
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="tbox">
+	              </div>
+	              <div className="scard-body">
+	                <div className="tbox">
                   <div className="tbox-top">
                     <span className="tbox-label">
                       {stakingAction === 'stake' ? 'You send' : stakingAction === 'swap' ? 'You move' : 'You remove'}
@@ -2178,15 +2336,54 @@ function App() {
                         Max
                       </span>
                     </span>
-                  </div>
-                  <div className="tbox-main">
-                    <div className="tok">
-                      <div className={`tok-ic ${stakingAction === 'stake' ? 'it' : 'ia'}`}>
-                        {stakingAction === 'stake' ? 'τ' : 'α'}
-                      </div>
-                      {stakingAction === 'stake' ? 'TAO' : 'ALPHA'}
-                    </div>
-                    <div className="swap-amount-shell">
+	                  </div>
+	                  <div className="tbox-main">
+	                    <div className={`asset-picker ${stakingAction === 'stake' ? 'asset-picker--static' : ''}`}>
+	                      <div className={`tok-ic ${stakingAction === 'stake' ? 'it' : 'ia'}`}>
+	                        {stakingAction === 'stake' ? 'τ' : 'α'}
+	                      </div>
+	                      <span className="asset-symbol">{stakingAction === 'stake' ? 'TAO' : 'ALPHA'}</span>
+	                      {stakingAction === 'swap' ? (
+	                        <select
+	                          className="asset-route-select"
+	                          value={swapSourceNetuid}
+	                          onChange={(event) => setSwapSourceNetuid(Number(event.target.value))}
+	                          aria-label="Source subnet"
+	                        >
+	                          {activeSwapSources.map(([id, bal]) => {
+	                            const sourceNetuid = Number(id);
+	                            const sourceMeta = getUiSubnetPresentation(sourceNetuid);
+
+	                            return (
+	                              <option key={id} value={sourceNetuid}>
+	                                {sourceMeta.code} — {sourceMeta.name} · {formatTokenAmount(bal)}α
+	                              </option>
+	                            );
+	                          })}
+	                        </select>
+	                      ) : stakingAction === 'unstake' ? (
+	                        <select
+	                          className="asset-route-select"
+	                          value={unstakeNetuid}
+	                          onChange={(event) => setUnstakeNetuid(Number(event.target.value))}
+	                          aria-label="Unstake source subnet"
+	                        >
+	                          {activeUnstakeSources.map(([id, bal]) => {
+	                            const sourceNetuid = Number(id);
+	                            const sourceMeta = getUiSubnetPresentation(sourceNetuid);
+
+	                            return (
+	                              <option key={id} value={sourceNetuid}>
+	                                {sourceMeta.code} — {sourceMeta.name} · {formatTokenAmount(bal)}α
+	                              </option>
+	                            );
+	                          })}
+	                        </select>
+	                      ) : (
+	                        <span className="asset-route-static">Testnet</span>
+	                      )}
+	                    </div>
+	                    <div className="swap-amount-shell">
                       <input
                         type="number"
                         className="swap-amt-input"
@@ -2206,8 +2403,8 @@ function App() {
                           : stakingAction === 'swap'
                             ? `From ${selectedSwapSourceSubnet.code}`
                             : `From ${selectedUnstakeSubnet.code}`}
-                      </div>
-                    </div>
+	                  </div>
+	                </div>
                   </div>
                 </div>
 
@@ -2223,30 +2420,70 @@ function App() {
                       {stakingAction === 'stake'
                         ? 'You receive (staked)'
                         : stakingAction === 'swap'
-                          ? 'You receive'
+                          ? 'You receive on destination'
                           : 'You receive back'}
                     </span>
-                    <span className="tbox-bal">Bittensor EVM testnet only</span>
-                  </div>
-                  <div className="tbox-main">
-                    <div className="tok">
-                      <div className={`tok-ic ${stakingAction === 'unstake' ? 'it' : 'ia'}`}>
-                        {stakingAction === 'unstake' ? 'τ' : 'α'}
-                      </div>
-                      {stakingAction === 'unstake' ? 'TAO' : 'ALPHA'}
-                    </div>
+                    <span className="tbox-bal">
+                      {stakingAction === 'swap' ? 'Simulated quote' : 'Bittensor EVM testnet only'}
+                    </span>
+	                  </div>
+	                  <div className="tbox-main">
+	                    <div className={`asset-picker ${stakingAction === 'unstake' ? 'asset-picker--static' : ''}`}>
+	                      <div className={`tok-ic ${stakingAction === 'unstake' ? 'it' : 'ia'}`}>
+	                        {stakingAction === 'unstake' ? 'τ' : 'α'}
+	                      </div>
+	                      <span className="asset-symbol">{stakingAction === 'unstake' ? 'TAO' : 'ALPHA'}</span>
+	                      {stakingAction === 'stake' ? (
+	                        <select
+	                          className="asset-route-select"
+	                          value={netuid}
+	                          onChange={(event) => setNetuid(Number(event.target.value))}
+	                          aria-label="Stake destination subnet"
+	                        >
+	                          {destinationNetuids.map((displayNetuid) => {
+	                            const displayMeta = getUiSubnetPresentation(displayNetuid);
+
+	                            return (
+	                              <option key={displayNetuid} value={displayNetuid}>
+	                                {displayMeta.code} — {displayMeta.name}
+	                              </option>
+	                            );
+	                          })}
+	                        </select>
+	                      ) : stakingAction === 'swap' ? (
+	                        <select
+	                          className="asset-route-select"
+	                          value={swapTargetNetuid}
+	                          onChange={(event) => setSwapTargetNetuid(Number(event.target.value))}
+	                          aria-label="Destination subnet"
+	                        >
+	                          {swapDestinationNetuids.map((displayNetuid) => {
+	                            const displayMeta = getUiSubnetPresentation(displayNetuid);
+
+	                            return (
+	                              <option key={displayNetuid} value={displayNetuid}>
+	                                {displayMeta.code} — {displayMeta.name}
+	                              </option>
+	                            );
+	                          })}
+	                        </select>
+	                      ) : (
+	                        <span className="asset-route-static">Testnet</span>
+	                      )}
+	                    </div>
                     <div style={{ textAlign: 'right' }}>
                       <div className="tok-amt" style={stakingAction !== 'unstake' ? { color: 'var(--text-2)' } : undefined}>
                         ≈
-                        {stakingAction === 'stake' && isStakeEstimateLoading
+                        {(stakingAction === 'stake' && isStakeEstimateLoading) ||
+                        (stakingAction === 'swap' && isSwapEstimateLoading)
                           ? '...'
                           : formatTokenAmount(
                               stakingAction === 'stake'
                                 ? stakeAlphaEstimate ?? '0'
                                 : stakingAction === 'swap'
-                                  ? swapAmount || allAlphaBalances[swapSourceNetuid] || '0'
+                                  ? swapAlphaEstimate?.targetAlpha ?? '0'
                                   : unstakeAmount || allAlphaBalances[unstakeNetuid] || '0',
-                              stakingAction === 'stake' ? 6 : 4,
+                              stakingAction === 'stake' || stakingAction === 'swap' ? 6 : 4,
                             )}
                       </div>
                       <div className="tok-usd">
@@ -2255,7 +2492,9 @@ function App() {
                             ? `Simulated on ${selectedStakeSubnet.code}`
                             : `Staked on ${selectedStakeSubnet.code}`
                           : stakingAction === 'swap'
-                            ? `Moved to ${selectedSwapTargetSubnet.code}`
+                            ? swapAlphaEstimate
+                              ? `Simulated on ${selectedSwapTargetSubnet.code}`
+                              : `Move to ${selectedSwapTargetSubnet.code}`
                             : 'Returned to connected wallet'}
                       </div>
                     </div>
@@ -2270,7 +2509,7 @@ function App() {
                         <span>{getUiSubnetLabel(netuid)}</span>
                       </div>
                       <div className="det-row">
-                        <span>Current APY</span>
+                        <span>{APY_LABEL}</span>
                         <span style={{ color: 'var(--success)' }}>{selectedStakeSubnet.apy}</span>
                       </div>
                       <div className="det-row">
@@ -2295,6 +2534,22 @@ function App() {
                         <span>Destination</span>
                         <span>{getUiSubnetLabel(swapTargetNetuid)}</span>
                       </div>
+                      <div className="det-row">
+                        <span>Simulated receive</span>
+                        <span style={{ color: 'var(--success)' }}>
+                          {isSwapEstimateLoading
+                            ? 'Simulating...'
+                            : swapAlphaEstimate
+                              ? `≈${formatTokenAmount(swapAlphaEstimate.targetAlpha, 6)} ALPHA`
+                              : 'Pick source and destination'}
+                        </span>
+                      </div>
+                      {swapAlphaEstimate && (
+                        <div className="det-row">
+                          <span>Route value</span>
+                          <span>via ≈{formatTokenAmount(swapAlphaEstimate.intermediateTao, 6)} TAO</span>
+                        </div>
+                      )}
                     </>
                   )}
                   {stakingAction === 'unstake' && (
@@ -2323,7 +2578,7 @@ function App() {
                   <div className="swap-sim-t">
                     {stakingAction === 'unstake'
                       ? 'Estimated unlocked TAO'
-                      : `Simulated returns at ${selectedApy.toFixed(1)}% APY`}
+                      : `Projected returns at ${selectedApy.toFixed(1)}% ${APY_LABEL}`}
                   </div>
                   <div className="swap-sim-g">
                     <div className="ssim">
@@ -2366,11 +2621,13 @@ function App() {
                     disabled={
                       !account ||
                       status.type === 'loading' ||
+                      swapSourceNetuid === swapTargetNetuid ||
                       (swapAmount === '' &&
                         (!allAlphaBalances[swapSourceNetuid] || Number.parseFloat(allAlphaBalances[swapSourceNetuid]) === 0))
                     }
                   >
-                    Move stake to {selectedSwapTargetSubnet.code} →
+                    Move {formatTokenAmount(swapAmount || allAlphaBalances[swapSourceNetuid] || '0')} ALPHA from{' '}
+                    {selectedSwapSourceSubnet.code} to {selectedSwapTargetSubnet.code} →
                   </button>
                 )}
 
@@ -2401,109 +2658,143 @@ function App() {
                     ? stakingPositions.length > 0
                       ? 'Your current testnet positions. Click one to stake more on that subnet.'
                       : 'Choose which Bittensor testnet subnet receives your position.'
-                    : stakingAction === 'unstake'
-                      ? 'Choose which current testnet position you want to unwind.'
-                      : 'Choose which Bittensor testnet subnet receives your position. External-chain funding stays marked as coming soon.'}
+	                    : stakingAction === 'unstake'
+	                      ? 'Choose which current testnet position you want to unwind.'
+	                      : 'Route preview. Change the source and destination from the ALPHA selectors in the move card.'}
                 </p>
-                <div className="subnet-search">
-                  <Search size={14} />
-                  <input
-                    type="text"
-                    value={subnetSearchQuery}
-                    onChange={(event) => setSubnetSearchQuery(event.target.value)}
-                    placeholder={sidePanelShowsCurrentPositions ? 'Search positions' : 'Search subnet name or netuid'}
-                  />
-                  {subnetSearchQuery && (
-                    <button type="button" onClick={() => setSubnetSearchQuery('')} aria-label="Clear subnet search">
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-                {visibleSidePanelRouteNetuids.length > 0 ? (
-                  <div className="sn-list">
-                    {visibleSidePanelRouteNetuids.map((displayNetuid) => {
-                      const displayMeta = getUiSubnetPresentation(displayNetuid);
-                      const position = stakingPositionsByNetuid.get(displayNetuid);
-                      const isSelected =
-                        stakingAction === 'stake'
-                          ? netuid === displayNetuid
-                          : stakingAction === 'swap'
-                            ? swapTargetNetuid === displayNetuid
-                            : unstakeNetuid === displayNetuid;
-                      const routeAmount = position?.amount ?? formatTokenAmount(allAlphaBalances[displayNetuid] || '0');
-                      const routeApy = position?.apy ?? displayMeta.apy;
-                      const routeHotkey =
-                        position?.hotkey ?? stakedHotkeys[displayNetuid] ?? getHotkeyForNetuid(displayNetuid);
-
-                      return (
-                        <button
-                          key={displayNetuid}
-                          type="button"
-                          className={`sn-r ${isSelected ? 'sel' : ''}`}
-                          onClick={() =>
-                            stakingAction === 'stake'
-                              ? setNetuid(displayNetuid)
-                              : stakingAction === 'swap'
-                                ? setSwapTargetNetuid(displayNetuid)
-                                : setUnstakeNetuid(displayNetuid)
-                          }
-                        >
-                          <div className="sn-num">{displayMeta.code}</div>
-                          <div className="sn-info">
-                            <div className="sn-name">{displayMeta.name}</div>
-                            <div className="sn-cat">
-                              {sidePanelShowsCurrentPositions
-                                ? `Validator ${formatShortValue(routeHotkey, 8, 6)}`
-                                : displayMeta.category}
-                            </div>
-                          </div>
-                          <div className={`sn-apy ${sidePanelShowsCurrentPositions ? 'sn-apy--stack' : ''}`}>
-                            {sidePanelShowsCurrentPositions ? (
-                              <>
-                                <span>{routeAmount}α</span>
-                                <small>{routeApy} APY</small>
-                              </>
-                            ) : (
-                              routeApy
-                            )}
-                          </div>
-                          <div className="snr-radio" />
+	                {stakingAction === 'swap' ? (
+	                  <div className="route-preview">
+	                    <div className="route-selected-summary">
+	                      <div className="sn-num">{selectedSwapSourceSubnet.code}</div>
+	                      <div className="route-selected-summary__main">
+	                        <strong>{selectedSwapSourceSubnet.name}</strong>
+	                        <span>{selectedSwapSourceBalance} ALPHA available</span>
+	                      </div>
+	                      <div className="route-selected-summary__stat">
+	                        <span>{selectedSwapSourceSubnet.apy}</span>
+	                        <small>{APY_LABEL}</small>
+	                      </div>
+	                    </div>
+	                    <div className="route-flow-arrow">↓</div>
+	                    <div className="route-selected-summary route-selected-summary--destination">
+	                      <div className="sn-num">{selectedSwapTargetSubnet.code}</div>
+	                      <div className="route-selected-summary__main">
+	                        <strong>{selectedSwapTargetSubnet.name}</strong>
+	                        <span>{selectedSwapTargetSubnet.category}</span>
+	                      </div>
+	                      <div className="route-selected-summary__stat">
+	                        <span>{selectedSwapTargetSubnet.apy}</span>
+	                        <small>{APY_LABEL}</small>
+	                      </div>
+	                    </div>
+	                    <div className="route-quote-note">
+	                      Move {formatTokenAmount(swapAmount || allAlphaBalances[swapSourceNetuid] || '0')} ALPHA from{' '}
+	                      {selectedSwapSourceSubnet.code} to {selectedSwapTargetSubnet.code}
+	                      {swapAlphaEstimate
+	                        ? ` for about ${formatTokenAmount(swapAlphaEstimate.targetAlpha, 6)} destination ALPHA.`
+	                        : '.'}
+	                    </div>
+	                  </div>
+	                ) : (
+                  <>
+                    <div className="subnet-search">
+                      <Search size={14} />
+                      <input
+                        type="text"
+                        value={subnetSearchQuery}
+                        onChange={(event) => setSubnetSearchQuery(event.target.value)}
+                        placeholder={sidePanelShowsCurrentPositions ? 'Search positions' : 'Search subnet name or netuid'}
+                      />
+                      {subnetSearchQuery && (
+                        <button type="button" onClick={() => setSubnetSearchQuery('')} aria-label="Clear subnet search">
+                          <X size={14} />
                         </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="staking-position-empty">
-                    {subnetSearchQuery
-                      ? sidePanelShowsCurrentPositions
-                        ? 'No matching positions.'
-                        : 'No matching testnet subnets.'
-                      : 'No current testnet staking positions found for this wallet.'}
-                  </div>
-                )}
-                {!sidePanelShowsCurrentPositions && sidePanelPageCount > 1 && (
-                  <div className="subnet-pagination">
-                    <span>
-                      Page {currentDestinationPage} of {sidePanelPageCount} · {filteredSidePanelRouteNetuids.length}
-                      {subnetSearchQuery ? ` of ${sidePanelRouteNetuids.length}` : ''} subnets
-                    </span>
-                    <div className="subnet-pagination__controls">
-                      <button
-                        type="button"
-                        onClick={() => setDestinationPage((page) => Math.max(1, page - 1))}
-                        disabled={currentDestinationPage === 1}
-                      >
-                        Prev
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDestinationPage((page) => Math.min(sidePanelPageCount, page + 1))}
-                        disabled={currentDestinationPage === sidePanelPageCount}
-                      >
-                        Next
-                      </button>
+                      )}
                     </div>
-                  </div>
+                    {visibleSidePanelRouteNetuids.length > 0 ? (
+                      <div className="sn-list">
+                        {visibleSidePanelRouteNetuids.map((displayNetuid) => {
+                          const displayMeta = getUiSubnetPresentation(displayNetuid);
+                          const position = stakingPositionsByNetuid.get(displayNetuid);
+                          const isSelected =
+                            stakingAction === 'stake' ? netuid === displayNetuid : unstakeNetuid === displayNetuid;
+                          const routeAmount = position?.amount ?? formatTokenAmount(allAlphaBalances[displayNetuid] || '0');
+                          const routeApy = position?.apy ?? displayMeta.apy;
+                          const routeHotkey =
+                            position?.hotkey ?? stakedHotkeys[displayNetuid] ?? getHotkeyForNetuid(displayNetuid);
+
+                          return (
+                            <button
+                              key={displayNetuid}
+                              type="button"
+                              className={`sn-r ${isSelected ? 'sel' : ''}`}
+                              onClick={() =>
+                                stakingAction === 'stake'
+                                  ? setNetuid(displayNetuid)
+                                  : setUnstakeNetuid(displayNetuid)
+                              }
+                            >
+                              <div className="sn-num">{displayMeta.code}</div>
+                              <div className="sn-info">
+                                <div className="sn-name">{displayMeta.name}</div>
+                                <div className="sn-cat">
+                                  {sidePanelShowsCurrentPositions
+                                    ? `Validator ${formatShortValue(routeHotkey, 8, 6)}`
+                                    : displayMeta.category}
+                                </div>
+                              </div>
+                              <div className={`sn-apy ${sidePanelShowsCurrentPositions ? 'sn-apy--stack' : ''}`}>
+                                {sidePanelShowsCurrentPositions ? (
+                                  <>
+                                    <span>{routeAmount}α</span>
+                                    <small>{routeApy} {APY_LABEL}</small>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="sn-apy__value">{routeApy}</span>
+                                    <small className="sn-apy__label">{APY_LABEL}</small>
+                                  </>
+                                )}
+                              </div>
+                              <div className="snr-radio" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="staking-position-empty">
+                        {subnetSearchQuery
+                          ? sidePanelShowsCurrentPositions
+                            ? 'No matching positions.'
+                            : 'No matching testnet subnets.'
+                          : 'No current testnet staking positions found for this wallet.'}
+                      </div>
+                    )}
+                    {!sidePanelShowsCurrentPositions && sidePanelPageCount > 1 && (
+                      <div className="subnet-pagination">
+                        <span>
+                          Page {currentDestinationPage} of {sidePanelPageCount} · {filteredSidePanelRouteNetuids.length}
+                          {subnetSearchQuery ? ` of ${sidePanelRouteNetuids.length}` : ''} subnets
+                        </span>
+                        <div className="subnet-pagination__controls">
+                          <button
+                            type="button"
+                            onClick={() => setDestinationPage((page) => Math.max(1, page - 1))}
+                            disabled={currentDestinationPage === 1}
+                          >
+                            Prev
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDestinationPage((page) => Math.min(sidePanelPageCount, page + 1))}
+                            disabled={currentDestinationPage === sidePanelPageCount}
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
                 <div className="swap-side-footnote">
                   {stakingAction === 'stake'
@@ -2994,12 +3285,7 @@ function App() {
           </aside>
 
           <section className="app-main">
-            {showStatusBanner && (
-              <div className={`status-banner status-banner--${status.type}`}>
-                {status.type === 'error' ? <AlertCircle size={16} /> : <Activity size={16} />}
-                <span>{status.msg}</span>
-              </div>
-            )}
+            {showStatusBanner && renderStatusToast()}
 
             {appView === 'dashboard' && renderDashboardView()}
             {appView === 'history' && renderHistoryView()}
@@ -3011,6 +3297,7 @@ function App() {
                 allAlphaBalances={allAlphaBalances}
                 currentNetuid={netuid}
                 simulateStakeAlpha={simulateStakeAlpha}
+                simulateSwapAlpha={simulateSwapAlpha}
                 executeStake={executeStake}
                 executeUnstake={executeUnstake}
                 executeSwap={executeSwap}
@@ -3041,12 +3328,7 @@ function App() {
               soon until it is actually live.
             </p>
 
-            {Boolean(status.msg) && (
-              <div className={`status-banner status-banner--${status.type === 'idle' ? 'loading' : status.type}`}>
-                {status.type === 'error' ? <AlertCircle size={16} /> : <Activity size={16} />}
-                <span>{status.msg}</span>
-              </div>
-            )}
+            {Boolean(status.msg) && renderStatusToast()}
 
             <div className="wallet-modal-card__options">{WALLET_OPTIONS.map(renderWalletModalOption)}</div>
           </div>
