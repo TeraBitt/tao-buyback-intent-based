@@ -10,6 +10,7 @@ interface ChatPortalProps {
   myAlphaBalance: string;
   allAlphaBalances: { [id: number]: string };
   currentNetuid: number;
+  simulateStakeAlpha: (amount: string, netuid: number) => Promise<string | null>;
   executeStake: (amount: string, netuid: number) => Promise<boolean>;
   executeUnstake: (netuid: number, amount?: string) => Promise<boolean>;
   executeSwap: (sourceNetuid: number, targetNetuid: number, amount: string) => Promise<boolean>;
@@ -80,6 +81,7 @@ interface ChatMessage {
     amount?: string;
     netuid: number;
     targetNetuid?: number;
+    estimatedAlpha?: string;
   };
 }
 
@@ -104,6 +106,7 @@ export default function ChatPortal({
   myAlphaBalance,
   allAlphaBalances,
   currentNetuid,
+  simulateStakeAlpha,
   executeStake,
   executeUnstake,
   executeSwap,
@@ -147,6 +150,13 @@ export default function ChatPortal({
   const formatShortValue = (value: string, start = 6, end = 4) => {
     if (!value) return '';
     return `${value.slice(0, start)}...${value.slice(-end)}`;
+  };
+
+  const formatTokenAmount = (value?: string, digits = 6) => {
+    if (!value) return '';
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed)) return value;
+    return parsed.toFixed(digits).replace(/\.?0+$/, '');
   };
 
   const chatReady = Boolean(chatSession);
@@ -207,12 +217,15 @@ export default function ChatPortal({
           await processResponse(nextResult);
         } else if (call.name === 'initiate_stake') {
           const { amount, netuid } = call.args as { amount: string; netuid: number };
+          const estimatedAlpha = await simulateStakeAlpha(amount, netuid);
           setMessages((prev) => [
             ...prev,
             {
               role: 'model',
-              text: `I drafted a staking intent for ${amount} TAO into Netuid ${netuid}. Review it below and confirm when you are ready.`,
-              action: { type: 'stake', amount, netuid },
+              text: estimatedAlpha
+                ? `I drafted a staking intent for ${amount} TAO into Netuid ${netuid}. Simulation estimates about ${formatTokenAmount(estimatedAlpha)} ALPHA before fees and final execution.`
+                : `I drafted a staking intent for ${amount} TAO into Netuid ${netuid}. Review it below and confirm when you are ready.`,
+              action: { type: 'stake', amount, netuid, estimatedAlpha: estimatedAlpha ?? undefined },
             },
           ]);
         } else if (call.name === 'initiate_unstake' && chatSession) {
@@ -326,7 +339,7 @@ export default function ChatPortal({
       <div className="chat-head">
         <div className="chat-head-l">
           <div className="ch-title">TaoChat</div>
-          <div className="ch-sub">{account ? 'Bittensor EVM connected' : 'Bittensor EVM only · connect wallet'}</div>
+          <div className="ch-sub">{account ? 'Bittensor EVM testnet connected' : 'Bittensor EVM testnet · connect wallet'}</div>
         </div>
 
         {account ? (
@@ -352,7 +365,7 @@ export default function ChatPortal({
       {!account && (
         <div className="chat-inline-banner">
           <ShieldAlert size={16} />
-          <span>Live today: Bittensor EVM staking, unstaking, and subnet rotation. External-chain deposits are coming soon.</span>
+          <span>Live today: Bittensor EVM testnet staking, unstaking, and subnet rotation. External-chain deposits are coming soon.</span>
         </div>
       )}
 
@@ -411,6 +424,14 @@ export default function ChatPortal({
                         <div className="trow">
                           <span className="trow-k">Subnet</span>
                           <span className="trow-v trow-vo">Netuid {message.action.netuid}</span>
+                        </div>
+                        <div className="trow">
+                          <span className="trow-k">Estimated receive</span>
+                          <span className="trow-v trow-vg">
+                            {message.action.estimatedAlpha
+                              ? `≈${formatTokenAmount(message.action.estimatedAlpha)} ALPHA`
+                              : 'Simulation unavailable'}
+                          </span>
                         </div>
                       </>
                     )}

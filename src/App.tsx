@@ -4,6 +4,8 @@ import { blake2b } from 'blakejs';
 import {
   Activity,
   AlertCircle,
+  Search,
+  X,
 } from 'lucide-react';
 import { CONFIG } from './config';
 import abiData from './abi.json';
@@ -64,11 +66,14 @@ interface HistoryCacheEntry {
 
 interface StakingPositionSummary {
   netuid: number;
-  title: string;
-  badge: string;
   hotkey: string;
   amount: string;
   apy: string;
+}
+
+interface SubnetCatalogEntry {
+  netuid: number;
+  name: string;
 }
 
 interface SubnetPresentation {
@@ -119,7 +124,7 @@ const COMMAND_PREVIEWS = [
   },
   {
     prompt: '"Move half my position from Subnet 310 into Subnet 19"',
-    result: 'Subnet rotation prepared on Bittensor EVM with source, target, and amount ready for review',
+    result: 'Subnet rotation prepared on Bittensor EVM testnet with source, target, and amount ready for review',
   },
   {
     prompt: '"Unstake everything from Subnet 4 and move to Subnet 11"',
@@ -142,7 +147,7 @@ const VISION_POINTS = [
     icon: '⇄',
     title: 'Cross-chain next',
     description:
-      'SOL, ETH, and other external-chain routes are coming soon. The live build stays focused on native Bittensor EVM flows for now.',
+      'SOL, ETH, and other external-chain routes are coming soon. The live build stays focused on native Bittensor EVM testnet flows for now.',
   },
   {
     icon: '◎',
@@ -206,12 +211,12 @@ const USE_CASES = [
 const SUPPORTED_NETWORKS = [
   { name: 'Solana', symbol: '◎', status: 'Coming soon', style: { background: '#9945FF', color: '#fff' } },
   { name: 'Ethereum', symbol: '⟠', status: 'Coming soon', style: { background: '#627EEA', color: '#fff' } },
-  { name: 'Bittensor EVM', symbol: 'τ', status: 'Live', style: { background: '#E8622A', color: '#fff' } },
+  { name: 'Bittensor EVM Testnet', symbol: 'τ', status: 'Live', style: { background: '#E8622A', color: '#fff' } },
   { name: 'BNB Chain', symbol: '⬡', status: 'Coming soon' },
 ];
 
 const DISPLAY_SUBNETS = [
-  { netuid: 310, code: 'SN310', name: 'Alpha', category: 'Bittensor EVM route', apy: '18.4%' },
+  { netuid: 310, code: 'SN310', name: 'Alpha', category: 'Bittensor EVM testnet route', apy: '18.4%' },
   { netuid: 19, code: 'SN19', name: 'Vision', category: 'Image AI', apy: '34.2%' },
   { netuid: 27, code: 'SN27', name: 'Inference', category: 'LLM serving', apy: '28.6%' },
   { netuid: 11, code: 'SN11', name: 'Code', category: 'Code generation', apy: '22.3%' },
@@ -221,11 +226,12 @@ const DISPLAY_SUBNETS = [
 const CONTRACT_DEPLOY_BLOCK = 7147534;
 const HISTORY_LOG_PAGE_SIZE = 5000;
 const HISTORY_MAX_EVENTS = 150;
-const HISTORY_DECODE_CONCURRENCY = 2;
 const HISTORY_PAGE_SIZE = 10;
+const TESTNET_SUBNET_PAGE_SIZE = 8;
 const RPC_REQUEST_SPACING_MS = 300;
 const RPC_RATE_LIMIT_BACKOFF_MS = 2500;
 const RPC_MAX_RETRIES = 4;
+const RPC_BATCH_MAX_COUNT = 45;
 const INTENT_FILLED_TOPIC = ethers.id('IntentFilled(address,address,uint256)');
 const contractInterface = new ethers.Interface(CONTRACT_ABI);
 const stakingCallInterface = new ethers.Interface([
@@ -238,7 +244,8 @@ const STAKING_PRECOMPILE_ADDRESS = '0x0000000000000000000000000000000000000805';
 // Single persistent JsonRpcProvider for all read-only calls
 const directProvider = new ethers.JsonRpcProvider(CONFIG.NETWORK.rpcUrls[0], undefined, {
   staticNetwork: true,
-  batchMaxCount: 1,
+  batchMaxCount: RPC_BATCH_MAX_COUNT,
+  batchStallTime: 25,
 });
 
 const stakingPrecompile = new ethers.Contract(
@@ -473,26 +480,175 @@ const withRpcBackoff = async <Result,>(operation: () => Promise<Result>) => {
 
 const getAddressTopic = (address: string) => ethers.zeroPadValue(normalizeAddress(address), 32);
 
-const mapWithConcurrency = async <Item, Result>(
-  items: Item[],
-  limit: number,
-  mapper: (item: Item, index: number) => Promise<Result>,
-) => {
-  const results: Result[] = [];
-  let nextIndex = 0;
-  const workerCount = Math.min(limit, items.length);
+const settleRpcBatch = async (createOperations: () => Promise<unknown>[]) =>
+  withRpcBackoff(async () => {
+    const operations = createOperations();
+    if (operations.length === 0) return [];
 
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < items.length) {
-        const currentIndex = nextIndex;
-        nextIndex += 1;
-        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    const results = await Promise.allSettled(operations);
+    const retryableFailure = results.find(
+      (result) => result.status === 'rejected' && isRetryableRpcError(result.reason),
+    );
+
+    if (retryableFailure?.status === 'rejected') {
+      throw retryableFailure.reason;
+    }
+
+    return results;
+  });
+
+const logRejectedRpcResult = (label: string, result?: PromiseSettledResult<unknown>) => {
+  if (result?.status === 'rejected') {
+    console.error(`${label} failed:`, result.reason);
+  }
+};
+
+const toBigIntOrZero = (value: unknown) => {
+  try {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.trunc(value));
+    if (typeof value === 'string' && value !== '') return BigInt(value);
+    if (value !== null && value !== undefined) return BigInt(String(value));
+  } catch {
+    return 0n;
+  }
+
+  return 0n;
+};
+
+const bytesFromScaleResult = (scaleBytes: unknown) => {
+  if (!scaleBytes) return null;
+
+  if (typeof scaleBytes === 'string') {
+    const hex = scaleBytes.replace('0x', '');
+    const arr = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2) {
+      arr[i / 2] = Number.parseInt(hex.substring(i, i + 2), 16);
+    }
+    return arr;
+  }
+
+  if (Array.isArray(scaleBytes)) {
+    return new Uint8Array(scaleBytes);
+  }
+
+  if (scaleBytes instanceof Uint8Array) {
+    return scaleBytes;
+  }
+
+  return null;
+};
+
+const readScaleCompact = (compactBytes: Uint8Array, cursor: { value: number }): bigint => {
+  const first = compactBytes[cursor.value++];
+  const mode = first & 0x03;
+
+  if (mode === 0) {
+    return BigInt(first >> 2);
+  }
+
+  if (mode === 1) {
+    const second = compactBytes[cursor.value++];
+    return BigInt((first >> 2) | (second << 6));
+  }
+
+  if (mode === 2) {
+    const b1 = compactBytes[cursor.value++];
+    const b2 = compactBytes[cursor.value++];
+    const b3 = compactBytes[cursor.value++];
+    const val = (first >> 2) | (b1 << 6) | (b2 << 14) | (b3 << 22);
+    return BigInt(val >>> 0);
+  }
+
+  const len = (first >> 2) + 4;
+  let val = 0n;
+  for (let i = 0; i < len; i += 1) {
+    val |= BigInt(compactBytes[cursor.value++]) << BigInt(i * 8);
+  }
+  return val;
+};
+
+const readCompactByteString = (compactBytes: Uint8Array, cursor: { value: number }) => {
+  const length = Number(readScaleCompact(compactBytes, cursor));
+  const bytes: number[] = [];
+
+  for (let index = 0; index < length; index += 1) {
+    bytes.push(Number(readScaleCompact(compactBytes, cursor)));
+  }
+
+  return new TextDecoder().decode(new Uint8Array(bytes)).trim();
+};
+
+const skipRawByteVector = (compactBytes: Uint8Array, cursor: { value: number }) => {
+  const length = Number(readScaleCompact(compactBytes, cursor));
+  cursor.value += length;
+};
+
+const skipSubnetIdentityV3 = (compactBytes: Uint8Array, cursor: { value: number }) => {
+  const optionTag = compactBytes[cursor.value++];
+  if (optionTag !== 1) return;
+
+  for (let fieldIndex = 0; fieldIndex < 8; fieldIndex += 1) {
+    skipRawByteVector(compactBytes, cursor);
+  }
+};
+
+const decodeSubnetCatalog = (scaleBytes: unknown): SubnetCatalogEntry[] => {
+  const bytes = bytesFromScaleResult(scaleBytes);
+  if (!bytes) return [];
+
+  try {
+    const cursor = { value: 0 };
+    const subnetCount = Number(readScaleCompact(bytes, cursor));
+    if (!Number.isFinite(subnetCount) || subnetCount <= 0) return [];
+
+    const catalog: SubnetCatalogEntry[] = [];
+
+    for (let index = 0; index < subnetCount && cursor.value < bytes.length; index += 1) {
+      const optionTag = bytes[cursor.value++];
+      if (optionTag !== 1) continue;
+
+      const netuid = Number(readScaleCompact(bytes, cursor));
+      cursor.value += 64;
+
+      const name = readCompactByteString(bytes, cursor);
+      readCompactByteString(bytes, cursor);
+
+      for (let fieldIndex = 0; fieldIndex < 14; fieldIndex += 1) {
+        readScaleCompact(bytes, cursor);
       }
-    }),
-  );
 
-  return results;
+      skipSubnetIdentityV3(bytes, cursor);
+      cursor.value += 16;
+
+      catalog.push({
+        netuid,
+        name: name || 'unknown',
+      });
+    }
+
+    return catalog;
+  } catch (error) {
+    console.error('Failed to decode testnet subnet catalog:', error);
+    return [];
+  }
+};
+
+const decodeSimSwapAlphaAmount = (scaleBytes: unknown) => {
+  const bytes = bytesFromScaleResult(scaleBytes);
+  if (!bytes || bytes.length < 16) return null;
+
+  try {
+    let alphaAmountRao = 0n;
+    for (let index = 0; index < 8; index += 1) {
+      alphaAmountRao |= BigInt(bytes[8 + index]) << BigInt(index * 8);
+    }
+
+    return ethers.formatUnits(alphaAmountRao, 9);
+  } catch (error) {
+    console.error('Failed to decode simulated ALPHA output:', error);
+    return null;
+  }
 };
 
 const getTimestampFromNonce = (nonce?: string) => {
@@ -512,28 +668,95 @@ const getTimestampFromNonce = (nonce?: string) => {
   return Date.now();
 };
 
-const fetchIntentFilledLogs = async (userAddress?: string) => {
+const getIntentFilledTopics = (userAddress?: string) =>
+  userAddress ? [INTENT_FILLED_TOPIC, getAddressTopic(userAddress)] : [INTENT_FILLED_TOPIC];
+
+const sortHistoryLogs = (logs: ethers.Log[]) =>
+  logs
+    .sort((left, right) => right.blockNumber - left.blockNumber || right.index - left.index)
+    .slice(0, HISTORY_MAX_EVENTS);
+
+const fetchPagedIntentFilledLogs = async (userAddress?: string) => {
   const latestBlock = await withRpcBackoff(() => directProvider.getBlockNumber());
-  const logs: ethers.Log[] = [];
-  const topics = userAddress ? [INTENT_FILLED_TOPIC, getAddressTopic(userAddress)] : [INTENT_FILLED_TOPIC];
+  const topics = getIntentFilledTopics(userAddress);
+  const ranges: { fromBlock: number; toBlock: number }[] = [];
 
   for (let fromBlock = CONTRACT_DEPLOY_BLOCK; fromBlock <= latestBlock; fromBlock += HISTORY_LOG_PAGE_SIZE) {
-    const toBlock = Math.min(fromBlock + HISTORY_LOG_PAGE_SIZE - 1, latestBlock);
-    const pageLogs = await withRpcBackoff(() =>
+    ranges.push({
+      fromBlock,
+      toBlock: Math.min(fromBlock + HISTORY_LOG_PAGE_SIZE - 1, latestBlock),
+    });
+  }
+
+  const results = await settleRpcBatch(() =>
+    ranges.map((range) =>
       directProvider.getLogs({
         address: CONFIG.CONTRACT_ADDRESS,
         topics,
-        fromBlock,
-        toBlock,
+        fromBlock: range.fromBlock,
+        toBlock: range.toBlock,
       }),
-    );
+    ),
+  );
 
-    logs.push(...pageLogs);
-  }
+  return sortHistoryLogs(
+    results.flatMap((result, index) => {
+      logRejectedRpcResult(`history logs ${ranges[index]?.fromBlock ?? index}`, result);
+      return result?.status === 'fulfilled' ? (result.value as ethers.Log[]) : [];
+    }),
+  );
+};
 
-  return logs
-    .sort((left, right) => right.blockNumber - left.blockNumber || right.index - left.index)
-    .slice(0, HISTORY_MAX_EVENTS);
+const fetchIntentFilledLogGroups = async (userAddress?: string) => {
+  const targets: { source: HistorySource; userAddress?: string }[] = userAddress
+    ? [
+        { source: 'wallet', userAddress },
+        { source: 'contract' },
+      ]
+    : [{ source: 'contract' }];
+
+  const results = await settleRpcBatch(() =>
+    targets.map((target) =>
+      directProvider.getLogs({
+        address: CONFIG.CONTRACT_ADDRESS,
+        topics: getIntentFilledTopics(target.userAddress),
+        fromBlock: CONTRACT_DEPLOY_BLOCK,
+        toBlock: 'latest',
+      }),
+    ),
+  );
+
+  return Promise.all(
+    targets.map(async (target, index) => {
+      const result = results[index];
+
+      if (result?.status === 'fulfilled') {
+        return {
+          source: target.source,
+          logs: sortHistoryLogs(result.value as ethers.Log[]),
+        };
+      }
+
+      logRejectedRpcResult(`${target.source} history logs`, result);
+      return {
+        source: target.source,
+        logs: await fetchPagedIntentFilledLogs(target.userAddress),
+      };
+    }),
+  );
+};
+
+const fetchHistoryTransactions = async (logs: ethers.Log[]) => {
+  if (logs.length === 0) return [];
+
+  const results = await settleRpcBatch(() =>
+    logs.map((log) => directProvider.send('eth_getTransactionByHash', [log.transactionHash])),
+  );
+
+  return results.map((result, index) => {
+    logRejectedRpcResult(`history transaction ${logs[index]?.transactionHash ?? index}`, result);
+    return result?.status === 'fulfilled' ? (result.value as RawRpcTransaction | null) : null;
+  });
 };
 
 const decodeStakingCall = (callData: string): DecodedStakingCall | null => {
@@ -603,6 +826,8 @@ function App() {
   const [totalAlphaStaked, setTotalAlphaStaked] = useState('0');
   const [allAlphaBalances, setAllAlphaBalances] = useState<{ [id: number]: string }>({});
   const [stakedHotkeys, setStakedHotkeys] = useState<{ [netuid: number]: string }>({});
+  const [availableNetuids, setAvailableNetuids] = useState<number[]>(DISPLAY_SUBNETS.map((subnet) => subnet.netuid));
+  const [subnetNamesByNetuid, setSubnetNamesByNetuid] = useState<{ [netuid: number]: string }>({});
   const [stakeHistory, setStakeHistory] = useState<StakeEvent[]>([]);
   const [sessionStakeHistory, setSessionStakeHistory] = useState<StakeEvent[]>([]);
   const [walletType, setWalletType] = useState<WalletType | null>(null);
@@ -613,9 +838,13 @@ function App() {
   const [unstakeAmount, setUnstakeAmount] = useState('');
   const [netuid, setNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
   const [unstakeNetuid, setUnstakeNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
+  const [stakeAlphaEstimate, setStakeAlphaEstimate] = useState<string | null>(null);
+  const [isStakeEstimateLoading, setIsStakeEstimateLoading] = useState(false);
   const [swapAmount, setSwapAmount] = useState('');
   const [swapSourceNetuid, setSwapSourceNetuid] = useState<number>(CONFIG.DEFAULT_NETUID);
   const [swapTargetNetuid, setSwapTargetNetuid] = useState<number>(19);
+  const [destinationPage, setDestinationPage] = useState(1);
+  const [subnetSearchQuery, setSubnetSearchQuery] = useState('');
 
   const [surface, setSurface] = useState<Surface>('landing');
   const [appView, setAppView] = useState<AppView>('dashboard');
@@ -737,11 +966,32 @@ function App() {
     }
   };
 
-  const fetchStats = async (prov: ethers.BrowserProvider, address: string) => {
-    try {
-      const bal = await prov.getBalance(address);
-      setBalance(ethers.formatEther(bal));
+  const simulateStakeAlpha = async (amount: string, targetNetuid: number): Promise<string | null> => {
+    const numericAmount = Number.parseFloat(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || targetNetuid < 0) {
+      return null;
+    }
 
+    try {
+      const amountInRao = ethers.parseEther(amount) / 1000000000n;
+      const amountParam = Number(amountInRao);
+
+      if (!Number.isSafeInteger(amountParam) || amountParam <= 0) {
+        return null;
+      }
+
+      const simulation = await withRpcBackoff(() =>
+        directProvider.send('swap_simSwapTaoForAlpha', [targetNetuid, amountParam]),
+      );
+      return decodeSimSwapAlphaAmount(simulation);
+    } catch (error) {
+      console.error('Failed to simulate stake output:', error);
+      return null;
+    }
+  };
+
+  const fetchStats = async (address: string) => {
+    try {
       const evmHex = CONFIG.CONTRACT_ADDRESS.replace('0x', '');
       const evmAddrBytes = new Uint8Array(evmHex.length / 2);
       for (let i = 0; i < evmHex.length; i += 2) {
@@ -773,22 +1023,6 @@ function App() {
 
       const hotkey = stakedHotkeys[netuid] || getHotkeyForNetuid(netuid);
 
-      try {
-        const alpha = await withRpcBackoff(() => stakingPrecompile.getTotalAlphaStaked(hotkey, netuid));
-        setTotalAlphaStaked((Number(alpha) / 1e9).toString());
-      } catch (error) {
-        console.error('getTotalAlphaStaked failed:', error);
-        setTotalAlphaStaked('0');
-      }
-
-      try {
-        const myStake = await withRpcBackoff(() => stakingPrecompile.getStake(hotkey, contractColdkey, netuid));
-        setMyAlphaBalance((Number(myStake) / 1e9).toString());
-      } catch (error) {
-        console.error('getStake failed:', error);
-        setMyAlphaBalance('0');
-      }
-
       const balances: { [id: number]: string } = {};
       const hotkeysMap: { [id: number]: string } = {};
 
@@ -801,35 +1035,66 @@ function App() {
         return bytes;
       };
 
-      try {
-        const contractScaleBytes = await withRpcBackoff(() =>
+      const [balanceResult, totalAlphaResult, myStakeResult, contractScaleResult, walletScaleResult, subnetInfoResult] =
+        await settleRpcBatch(() => [
+          directProvider.getBalance(address),
+          stakingPrecompile.getTotalAlphaStaked(hotkey, netuid),
+          stakingPrecompile.getStake(hotkey, contractColdkey, netuid),
           directProvider.send('delegateInfo_getDelegated', [hexToBytes(contractColdkey)]),
-        );
-        const walletScaleBytes = await withRpcBackoff(() =>
           directProvider.send('delegateInfo_getDelegated', [hexToBytes(walletColdkey)]),
-        ).catch(() => []);
+          directProvider.send('subnetInfo_getAllDynamicInfo', []),
+        ]);
 
-        const contractPositions = decodeDelegations(contractScaleBytes);
-        const walletPositions = decodeDelegations(walletScaleBytes);
+      logRejectedRpcResult('TAO balance', balanceResult);
+      logRejectedRpcResult('getTotalAlphaStaked', totalAlphaResult);
+      logRejectedRpcResult('getStake', myStakeResult);
+      logRejectedRpcResult('contract delegation positions', contractScaleResult);
+      logRejectedRpcResult('wallet delegation positions', walletScaleResult);
+      logRejectedRpcResult('available subnet scan', subnetInfoResult);
 
-        for (const position of contractPositions) {
-          if (position.stake > 0) {
-            balances[position.netuid] = position.stake.toString();
+      setBalance(balanceResult?.status === 'fulfilled' ? ethers.formatEther(toBigIntOrZero(balanceResult.value)) : '0');
+      setTotalAlphaStaked(
+        totalAlphaResult?.status === 'fulfilled'
+          ? (Number(toBigIntOrZero(totalAlphaResult.value)) / 1e9).toString()
+          : '0',
+      );
+      setMyAlphaBalance(
+        myStakeResult?.status === 'fulfilled'
+          ? (Number(toBigIntOrZero(myStakeResult.value)) / 1e9).toString()
+          : '0',
+      );
+
+      const contractPositions =
+        contractScaleResult?.status === 'fulfilled' ? decodeDelegations(contractScaleResult.value) : [];
+      const walletPositions = walletScaleResult?.status === 'fulfilled' ? decodeDelegations(walletScaleResult.value) : [];
+      const subnetCatalog =
+        subnetInfoResult?.status === 'fulfilled' ? decodeSubnetCatalog(subnetInfoResult.value) : [];
+
+      if (subnetCatalog.length > 0) {
+        setAvailableNetuids(subnetCatalog.map((subnet) => subnet.netuid));
+        setSubnetNamesByNetuid(
+          subnetCatalog.reduce<{ [netuid: number]: string }>((namesByNetuid, subnet) => {
+            namesByNetuid[subnet.netuid] = subnet.name || 'unknown';
+            return namesByNetuid;
+          }, {}),
+        );
+      }
+
+      for (const position of contractPositions) {
+        if (position.stake > 0) {
+          balances[position.netuid] = position.stake.toString();
+          hotkeysMap[position.netuid] = position.hotkey;
+        }
+      }
+
+      for (const position of walletPositions) {
+        if (position.stake > 0) {
+          const existingStake = balances[position.netuid] ? Number.parseFloat(balances[position.netuid]) : 0;
+          balances[position.netuid] = (existingStake + position.stake).toString();
+          if (!hotkeysMap[position.netuid]) {
             hotkeysMap[position.netuid] = position.hotkey;
           }
         }
-
-        for (const position of walletPositions) {
-          if (position.stake > 0) {
-            const existingStake = balances[position.netuid] ? Number.parseFloat(balances[position.netuid]) : 0;
-            balances[position.netuid] = (existingStake + position.stake).toString();
-            if (!hotkeysMap[position.netuid]) {
-              hotkeysMap[position.netuid] = position.hotkey;
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch/decode active delegation positions:', error);
       }
 
       if (balances[netuid] === undefined) {
@@ -876,116 +1141,108 @@ function App() {
         const orderedLogs = [...logs].sort(
           (left, right) => right.blockNumber - left.blockNumber || right.index - left.index,
         );
+        const transactions = await fetchHistoryTransactions(orderedLogs);
 
-        const decodedHistory = await mapWithConcurrency(
-          orderedLogs,
-          HISTORY_DECODE_CONCURRENCY,
-          async (log): Promise<StakeEvent | null> => {
-            try {
-              const intentEvent = decodeIntentLog(log);
-              const tx = (await withRpcBackoff(() =>
-                directProvider.send('eth_getTransactionByHash', [log.transactionHash]),
-              )) as RawRpcTransaction | null;
-              const txData = tx?.input ?? tx?.data;
-              if (!txData) return null;
+        const decodedHistory = orderedLogs.map((log, index): StakeEvent | null => {
+          try {
+            const intentEvent = decodeIntentLog(log);
+            const tx = transactions[index];
+            const txData = tx?.input ?? tx?.data;
+            if (!txData) return null;
 
-              const txValue = BigInt(tx?.value ?? '0x0');
-              const parsedTransaction = contractInterface.parseTransaction({ data: txData, value: txValue });
-              if (!parsedTransaction || parsedTransaction.name !== 'fillIntent') return null;
+            const txValue = BigInt(tx?.value ?? '0x0');
+            const parsedTransaction = contractInterface.parseTransaction({ data: txData, value: txValue });
+            if (!parsedTransaction || parsedTransaction.name !== 'fillIntent') return null;
 
-              const intent = parsedTransaction.args[0] as {
-                user?: string;
-                calls: Array<{ callData: string }>;
+            const intent = parsedTransaction.args[0] as {
+              user?: string;
+              calls: Array<{ callData: string }>;
+            };
+            const intentCalls = Array.isArray(intent.calls) ? intent.calls : [];
+            const decodedCalls = intentCalls
+              .map((call) => decodeStakingCall(call.callData))
+              .filter((call): call is DecodedStakingCall => Boolean(call));
+
+            if (decodedCalls.length === 0) return null;
+
+            const addCall = decodedCalls.find((call) => call.name === 'addStake');
+            const removeCall = decodedCalls.find(
+              (call) => call.name === 'removeStake' || call.name === 'removeStakeFull',
+            );
+            const timestamp = getTimestampFromNonce(intentEvent.nonce);
+            const user = intentEvent.user || (intent.user ? normalizeAddress(intent.user) : '');
+            const sharedEventDetails = {
+              user,
+              solver: intentEvent.solver,
+              nonce: intentEvent.nonce,
+              txHash: log.transactionHash,
+              blockNumber: log.blockNumber,
+              timestamp,
+            };
+
+            if (addCall && !removeCall) {
+              const stakeAmount =
+                txValue > 0n
+                  ? ethers.formatEther(txValue)
+                  : ethers.formatUnits(addCall.amountRao ?? 0n, 9);
+              return {
+                type: 'stake',
+                title: 'Stake TAO',
+                detail: `${getSubnetLabel(addCall.netuid)} • Hotkey ${formatShortValue(addCall.hotkey, 8, 6)}`,
+                amount: `${formatTokenAmount(stakeAmount)} TAO`,
+                ...sharedEventDetails,
               };
-              const intentCalls = Array.isArray(intent.calls) ? intent.calls : [];
-              const decodedCalls = intentCalls
-                .map((call) => decodeStakingCall(call.callData))
-                .filter((call): call is DecodedStakingCall => Boolean(call));
-
-              if (decodedCalls.length === 0) return null;
-
-              const addCall = decodedCalls.find((call) => call.name === 'addStake');
-              const removeCall = decodedCalls.find(
-                (call) => call.name === 'removeStake' || call.name === 'removeStakeFull',
-              );
-              const timestamp = getTimestampFromNonce(intentEvent.nonce);
-              const user = intentEvent.user || (intent.user ? normalizeAddress(intent.user) : '');
-              const sharedEventDetails = {
-                user,
-                solver: intentEvent.solver,
-                nonce: intentEvent.nonce,
-                txHash: log.transactionHash,
-                blockNumber: log.blockNumber,
-                timestamp,
-              };
-
-              if (addCall && !removeCall) {
-                const stakeAmount =
-                  txValue > 0n
-                    ? ethers.formatEther(txValue)
-                    : ethers.formatUnits(addCall.amountRao ?? 0n, 9);
-                return {
-                  type: 'stake',
-                  title: 'Stake TAO',
-                  detail: `${getSubnetLabel(addCall.netuid)} • Hotkey ${formatShortValue(addCall.hotkey, 8, 6)}`,
-                  amount: `${formatTokenAmount(stakeAmount)} TAO`,
-                  ...sharedEventDetails,
-                };
-              }
-
-              if (removeCall && addCall) {
-                return {
-                  type: 'swap',
-                  title: 'Move stake',
-                  detail: `${getSubnetLabel(removeCall.netuid)} → ${getSubnetLabel(addCall.netuid)}`,
-                  amount:
-                    removeCall.name === 'removeStake'
-                      ? `${formatTokenAmount(ethers.formatUnits(removeCall.amountRao ?? 0n, 9))} ALPHA`
-                      : 'All ALPHA',
-                  ...sharedEventDetails,
-                };
-              }
-
-              if (removeCall) {
-                return {
-                  type: 'unstake',
-                  title: 'Unstake Alpha',
-                  detail: `${getSubnetLabel(removeCall.netuid)} • Hotkey ${formatShortValue(removeCall.hotkey, 8, 6)}`,
-                  amount:
-                    removeCall.name === 'removeStake'
-                      ? `${formatTokenAmount(ethers.formatUnits(removeCall.amountRao ?? 0n, 9))} ALPHA`
-                      : 'All ALPHA',
-                  ...sharedEventDetails,
-                };
-              }
-
-              return null;
-            } catch (error) {
-              console.error('Failed to reconstruct on-chain history entry:', error);
-              return null;
             }
-          },
-        );
+
+            if (removeCall && addCall) {
+              return {
+                type: 'swap',
+                title: 'Move stake',
+                detail: `${getSubnetLabel(removeCall.netuid)} → ${getSubnetLabel(addCall.netuid)}`,
+                amount:
+                  removeCall.name === 'removeStake'
+                    ? `${formatTokenAmount(ethers.formatUnits(removeCall.amountRao ?? 0n, 9))} ALPHA`
+                    : 'All ALPHA',
+                ...sharedEventDetails,
+              };
+            }
+
+            if (removeCall) {
+              return {
+                type: 'unstake',
+                title: 'Unstake Alpha',
+                detail: `${getSubnetLabel(removeCall.netuid)} • Hotkey ${formatShortValue(removeCall.hotkey, 8, 6)}`,
+                amount:
+                  removeCall.name === 'removeStake'
+                    ? `${formatTokenAmount(ethers.formatUnits(removeCall.amountRao ?? 0n, 9))} ALPHA`
+                    : 'All ALPHA',
+                ...sharedEventDetails,
+              };
+            }
+
+            return null;
+          } catch (error) {
+            console.error('Failed to reconstruct on-chain history entry:', error);
+            return null;
+          }
+        });
 
         return decodedHistory
           .filter((event): event is StakeEvent => Boolean(event))
           .sort((left, right) => right.timestamp - left.timestamp || right.blockNumber - left.blockNumber);
       };
 
-      let historySourceForLogs: HistorySource = 'contract';
-      let logs = targetAddress ? await fetchIntentFilledLogs(targetAddress) : await fetchIntentFilledLogs();
-
-      if (targetAddress && logs.length > 0) {
-        historySourceForLogs = 'wallet';
-      } else if (targetAddress) {
-        logs = await fetchIntentFilledLogs();
-      }
-
-      let nextHistory = await decodeHistoryLogs(logs);
+      const logGroups = await fetchIntentFilledLogGroups(targetAddress || undefined);
+      const walletLogGroup = logGroups.find((group) => group.source === 'wallet');
+      const contractLogGroup = logGroups.find((group) => group.source === 'contract');
+      let historySourceForLogs: HistorySource = walletLogGroup && walletLogGroup.logs.length > 0 ? 'wallet' : 'contract';
+      let nextHistory = await decodeHistoryLogs(
+        historySourceForLogs === 'wallet' ? walletLogGroup?.logs ?? [] : contractLogGroup?.logs ?? [],
+      );
 
       if (targetAddress && historySourceForLogs === 'wallet' && nextHistory.length === 0) {
         historySourceForLogs = 'contract';
-        nextHistory = await decodeHistoryLogs(await fetchIntentFilledLogs());
+        nextHistory = await decodeHistoryLogs(contractLogGroup?.logs ?? []);
       }
 
       return {
@@ -1023,13 +1280,42 @@ function App() {
 
     const timer = window.setTimeout(() => {
       if (typeof netuid === 'number' && netuid >= 0) {
-        fetchStats(provider, account);
+        fetchStats(account);
       }
     }, 500);
 
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [netuid, account, provider, surface, appView]);
+
+  useEffect(() => {
+    setDestinationPage(1);
+  }, [stakingAction, availableNetuids.length, subnetSearchQuery]);
+
+  useEffect(() => {
+    if (surface !== 'app' || appView !== 'dashboard' || stakingAction !== 'stake' || !stakeAmount) {
+      setStakeAlphaEstimate(null);
+      setIsStakeEstimateLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setIsStakeEstimateLoading(true);
+
+    const timer = window.setTimeout(() => {
+      void simulateStakeAlpha(stakeAmount, netuid).then((estimate) => {
+        if (cancelled) return;
+        setStakeAlphaEstimate(estimate);
+        setIsStakeEstimateLoading(false);
+      });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stakeAmount, netuid, stakingAction, surface, appView]);
 
   const clearWalletState = () => {
     setIsWalletHydrating(false);
@@ -1046,6 +1332,12 @@ function App() {
     setSessionStakeHistory([]);
     setAllAlphaBalances({});
     setStakedHotkeys({});
+    setStakeAlphaEstimate(null);
+    setIsStakeEstimateLoading(false);
+    setSubnetNamesByNetuid({});
+    setAvailableNetuids(DISPLAY_SUBNETS.map((subnet) => subnet.netuid));
+    setDestinationPage(1);
+    setSubnetSearchQuery('');
     setWalletType(null);
     setShowWalletModal(false);
     localStorage.removeItem('connected_wallet');
@@ -1332,7 +1624,7 @@ function App() {
           ),
         );
         setStatus({ type: 'success', msg: 'Stake intent executed successfully.' });
-        await fetchStats(provider!, account);
+        await fetchStats(account);
         await fetchOnchainHistory(account, { force: true });
         return true;
       }
@@ -1418,7 +1710,7 @@ function App() {
           ),
         );
         setStatus({ type: 'success', msg: 'Unstake intent executed successfully.' });
-        await fetchStats(provider!, account);
+        await fetchStats(account);
         await fetchOnchainHistory(account, { force: true });
         return true;
       }
@@ -1528,7 +1820,7 @@ function App() {
           ),
         );
         setStatus({ type: 'success', msg: 'Subnet rotation executed successfully.' });
-        await fetchStats(provider!, account);
+        await fetchStats(account);
         await fetchOnchainHistory(account, { force: true });
         return true;
       }
@@ -1595,18 +1887,35 @@ function App() {
   const stakingPositions: StakingPositionSummary[] = activePositions
     .map(([id, bal]) => {
       const targetNetuid = Number(id);
-      const subnetMeta = getSubnetMeta(targetNetuid);
 
       return {
         netuid: targetNetuid,
-        title: subnetMeta ? `${subnetMeta.name} Subnet` : `Subnet ${targetNetuid}`,
-        badge: `Netuid ${targetNetuid}`,
         hotkey: stakedHotkeys[targetNetuid] || getHotkeyForNetuid(targetNetuid),
         amount: formatTokenAmount(bal),
         apy: getMockApyForNetuid(targetNetuid),
       };
     })
     .sort((left, right) => Number.parseFloat(right.amount) - Number.parseFloat(left.amount));
+  const stakingPositionsByNetuid = new Map(stakingPositions.map((position) => [position.netuid, position]));
+  const hasSubnetCatalog = Object.keys(subnetNamesByNetuid).length > 0;
+  const getUiSubnetPresentation = (targetNetuid: number): SubnetPresentation => {
+    const presentation = getSubnetPresentation(targetNetuid);
+    const registeredName = subnetNamesByNetuid[targetNetuid];
+
+    if (registeredName !== undefined || hasSubnetCatalog) {
+      return {
+        ...presentation,
+        name: registeredName || 'unknown',
+        category: 'Registered testnet subnet',
+      };
+    }
+
+    return presentation;
+  };
+  const getUiSubnetLabel = (targetNetuid: number) => {
+    const subnetMeta = getUiSubnetPresentation(targetNetuid);
+    return `${subnetMeta.code} — ${subnetMeta.name}`;
+  };
   const connectingWallet =
     !account && status.type === 'loading'
       ? WALLET_OPTIONS.find((option) => status.msg.toLowerCase().includes(option.label.toLowerCase()))?.id ?? null
@@ -1629,10 +1938,10 @@ function App() {
       : account
         ? 'No decoded activity for this wallet yet. Showing latest decoded contract events.'
         : 'Showing latest decoded IntentFilled events from the intent contract.';
-  const selectedStakeSubnet = getSubnetPresentation(netuid);
-  const selectedSwapSourceSubnet = getSubnetPresentation(swapSourceNetuid);
-  const selectedSwapTargetSubnet = getSubnetPresentation(swapTargetNetuid);
-  const selectedUnstakeSubnet = getSubnetPresentation(unstakeNetuid);
+  const selectedStakeSubnet = getUiSubnetPresentation(netuid);
+  const selectedSwapSourceSubnet = getUiSubnetPresentation(swapSourceNetuid);
+  const selectedSwapTargetSubnet = getUiSubnetPresentation(swapTargetNetuid);
+  const selectedUnstakeSubnet = getUiSubnetPresentation(unstakeNetuid);
 
   const handleExportHistory = () => {
     const rows = [
@@ -1690,7 +1999,7 @@ function App() {
         <div className="wpill">
           <div className="wdot" />
           <div className="waddr">{formatShortValue(account, 6, 4)}</div>
-          <div className="wnet">Bittensor EVM</div>
+          <div className="wnet">Testnet</div>
         </div>
         <button type="button" className="tao-btn tao-btn--ghost tao-btn--small" onClick={disconnectWallet}>
           Disconnect
@@ -1732,6 +2041,54 @@ function App() {
     const ninetyDayReturn = (simulationBase * selectedApy) / 4 / 100;
     const yearlyReturn = (simulationBase * selectedApy) / 100;
     const activeSwapSources = activePositions.length > 0 ? activePositions : [['310', allAlphaBalances[310] || '0']];
+    const scannedNetuids = [...availableNetuids]
+      .filter((targetNetuid) => targetNetuid > 0)
+      .sort((left, right) => left - right);
+    const destinationNetuids = Array.from(
+      new Set([
+        ...DISPLAY_SUBNETS.map((subnet) => subnet.netuid),
+        ...stakingPositions.map((position) => position.netuid),
+        ...scannedNetuids,
+      ]),
+    );
+    const sidePanelShowsCurrentPositions =
+      stakingAction === 'unstake' || (stakingAction === 'stake' && stakingPositions.length > 0);
+    const sidePanelRouteNetuids = sidePanelShowsCurrentPositions
+      ? stakingPositions.map((position) => position.netuid)
+      : destinationNetuids;
+    const normalizedSubnetSearch = subnetSearchQuery.trim().toLowerCase();
+    const filteredSidePanelRouteNetuids = normalizedSubnetSearch
+      ? sidePanelRouteNetuids.filter((displayNetuid) => {
+          const displayMeta = getUiSubnetPresentation(displayNetuid);
+          const position = stakingPositionsByNetuid.get(displayNetuid);
+          const searchText = [
+            displayMeta.code,
+            displayMeta.name,
+            displayMeta.category,
+            `sn${displayNetuid}`,
+            String(displayNetuid),
+            position?.hotkey ?? '',
+          ]
+            .join(' ')
+            .toLowerCase();
+
+          return searchText.includes(normalizedSubnetSearch);
+        })
+      : sidePanelRouteNetuids;
+    const sidePanelPageCount = Math.max(1, Math.ceil(filteredSidePanelRouteNetuids.length / TESTNET_SUBNET_PAGE_SIZE));
+    const currentDestinationPage = Math.min(destinationPage, sidePanelPageCount);
+    const visibleSidePanelRouteNetuids = sidePanelShowsCurrentPositions
+      ? filteredSidePanelRouteNetuids
+      : filteredSidePanelRouteNetuids.slice(
+          (currentDestinationPage - 1) * TESTNET_SUBNET_PAGE_SIZE,
+          currentDestinationPage * TESTNET_SUBNET_PAGE_SIZE,
+        );
+    const sidePanelTitle =
+      stakingAction === 'swap'
+        ? 'Testnet destination'
+        : sidePanelShowsCurrentPositions
+          ? 'Current positions'
+          : 'Testnet destination';
 
     return (
       <div className="swap-wrap">
@@ -1763,7 +2120,7 @@ function App() {
             Unstake
           </button>
           <div className="swap-mode-note">
-            External-chain deposits stay clearly marked as coming soon.
+            Live staking uses the Bittensor EVM testnet. External-chain deposits stay clearly marked as coming soon.
             {account ? ` Tracked total: ${formatTokenAmount(totalAlphaStaked)} ALPHA.` : ''}
           </div>
         </div>
@@ -1790,7 +2147,7 @@ function App() {
                           className={`swap-source-pill ${swapSourceNetuid === Number(id) ? 'is-active' : ''}`}
                           onClick={() => setSwapSourceNetuid(Number(id))}
                         >
-                          {getSubnetLabel(Number(id))} · {formatTokenAmount(bal)} ALPHA
+                          {getUiSubnetLabel(Number(id))} · {formatTokenAmount(bal)} ALPHA
                         </button>
                       ))}
                     </div>
@@ -1845,7 +2202,7 @@ function App() {
                       />
                       <div className="tok-usd">
                         {stakingAction === 'stake'
-                          ? 'Native TAO on Bittensor EVM'
+                          ? 'Native TAO on Bittensor EVM testnet'
                           : stakingAction === 'swap'
                             ? `From ${selectedSwapSourceSubnet.code}`
                             : `From ${selectedUnstakeSubnet.code}`}
@@ -1869,7 +2226,7 @@ function App() {
                           ? 'You receive'
                           : 'You receive back'}
                     </span>
-                    <span className="tbox-bal">Bittensor EVM only</span>
+                    <span className="tbox-bal">Bittensor EVM testnet only</span>
                   </div>
                   <div className="tbox-main">
                     <div className="tok">
@@ -1881,17 +2238,22 @@ function App() {
                     <div style={{ textAlign: 'right' }}>
                       <div className="tok-amt" style={stakingAction !== 'unstake' ? { color: 'var(--text-2)' } : undefined}>
                         ≈
-                        {formatTokenAmount(
-                          stakingAction === 'stake'
-                            ? stakeAmount || '0'
-                            : stakingAction === 'swap'
-                              ? swapAmount || allAlphaBalances[swapSourceNetuid] || '0'
-                              : unstakeAmount || allAlphaBalances[unstakeNetuid] || '0',
-                        )}
+                        {stakingAction === 'stake' && isStakeEstimateLoading
+                          ? '...'
+                          : formatTokenAmount(
+                              stakingAction === 'stake'
+                                ? stakeAlphaEstimate ?? '0'
+                                : stakingAction === 'swap'
+                                  ? swapAmount || allAlphaBalances[swapSourceNetuid] || '0'
+                                  : unstakeAmount || allAlphaBalances[unstakeNetuid] || '0',
+                              stakingAction === 'stake' ? 6 : 4,
+                            )}
                       </div>
                       <div className="tok-usd">
                         {stakingAction === 'stake'
-                          ? `Staked on ${selectedStakeSubnet.code}`
+                          ? stakeAlphaEstimate
+                            ? `Simulated on ${selectedStakeSubnet.code}`
+                            : `Staked on ${selectedStakeSubnet.code}`
                           : stakingAction === 'swap'
                             ? `Moved to ${selectedSwapTargetSubnet.code}`
                             : 'Returned to connected wallet'}
@@ -1904,12 +2266,22 @@ function App() {
                   {stakingAction === 'stake' && (
                     <>
                       <div className="det-row">
-                        <span>Stake destination</span>
-                        <span>{getSubnetLabel(netuid)}</span>
+                        <span>Testnet destination</span>
+                        <span>{getUiSubnetLabel(netuid)}</span>
                       </div>
                       <div className="det-row">
                         <span>Current APY</span>
                         <span style={{ color: 'var(--success)' }}>{selectedStakeSubnet.apy}</span>
+                      </div>
+                      <div className="det-row">
+                        <span>Simulated ALPHA</span>
+                        <span style={{ color: 'var(--success)' }}>
+                          {isStakeEstimateLoading
+                            ? 'Simulating...'
+                            : stakeAlphaEstimate
+                              ? `≈${formatTokenAmount(stakeAlphaEstimate, 6)} ALPHA`
+                              : 'Enter amount'}
+                        </span>
                       </div>
                     </>
                   )}
@@ -1917,11 +2289,11 @@ function App() {
                     <>
                       <div className="det-row">
                         <span>Source route</span>
-                        <span>{getSubnetLabel(swapSourceNetuid)}</span>
+                        <span>{getUiSubnetLabel(swapSourceNetuid)}</span>
                       </div>
                       <div className="det-row">
                         <span>Destination</span>
-                        <span>{getSubnetLabel(swapTargetNetuid)}</span>
+                        <span>{getUiSubnetLabel(swapTargetNetuid)}</span>
                       </div>
                     </>
                   )}
@@ -1929,7 +2301,7 @@ function App() {
                     <>
                       <div className="det-row">
                         <span>From subnet</span>
-                        <span>{getSubnetLabel(unstakeNetuid)}</span>
+                        <span>{getUiSubnetLabel(unstakeNetuid)}</span>
                       </div>
                       <div className="det-row">
                         <span>Unbonding</span>
@@ -2022,100 +2394,125 @@ function App() {
 
           <div>
             <div className="scard">
-              <div className="scard-head">
-                {stakingAction === 'stake'
-                  ? 'Staking Positions'
-                  : stakingAction === 'unstake'
-                    ? 'Current routes'
-                    : 'Stake destination'}
-              </div>
+              <div className="scard-head">{sidePanelTitle}</div>
               <div className="scard-body">
                 <p className="swap-side-copy">
                   {stakingAction === 'stake'
                     ? stakingPositions.length > 0
-                      ? 'Your current on-chain stakes and validator routes. Click any position to load it into the form.'
-                      : 'No live staking positions yet, so default subnet choices are shown for your next stake.'
+                      ? 'Your current testnet positions. Click one to stake more on that subnet.'
+                      : 'Choose which Bittensor testnet subnet receives your position.'
                     : stakingAction === 'unstake'
-                      ? 'Choose which live Bittensor EVM route you want to unwind.'
-                      : 'Choose which Bittensor subnet receives your position. External-chain funding stays marked as coming soon.'}
+                      ? 'Choose which current testnet position you want to unwind.'
+                      : 'Choose which Bittensor testnet subnet receives your position. External-chain funding stays marked as coming soon.'}
                 </p>
-                {stakingAction === 'stake' && stakingPositions.length > 0 ? (
-                  <div className="staking-position-list">
-                    {stakingPositions.map((position) => (
-                      <button
-                        key={`${position.netuid}-${position.hotkey}`}
-                        type="button"
-                        className={`staking-position-card ${netuid === position.netuid ? 'is-selected' : ''}`}
-                        onClick={() => setNetuid(position.netuid)}
-                      >
-                        <div className="staking-position-card__top">
-                          <div>
-                            <div className="staking-position-card__title">{position.title}</div>
-                            <div className="staking-position-card__badge">{position.badge}</div>
+                <div className="subnet-search">
+                  <Search size={14} />
+                  <input
+                    type="text"
+                    value={subnetSearchQuery}
+                    onChange={(event) => setSubnetSearchQuery(event.target.value)}
+                    placeholder={sidePanelShowsCurrentPositions ? 'Search positions' : 'Search subnet name or netuid'}
+                  />
+                  {subnetSearchQuery && (
+                    <button type="button" onClick={() => setSubnetSearchQuery('')} aria-label="Clear subnet search">
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+                {visibleSidePanelRouteNetuids.length > 0 ? (
+                  <div className="sn-list">
+                    {visibleSidePanelRouteNetuids.map((displayNetuid) => {
+                      const displayMeta = getUiSubnetPresentation(displayNetuid);
+                      const position = stakingPositionsByNetuid.get(displayNetuid);
+                      const isSelected =
+                        stakingAction === 'stake'
+                          ? netuid === displayNetuid
+                          : stakingAction === 'swap'
+                            ? swapTargetNetuid === displayNetuid
+                            : unstakeNetuid === displayNetuid;
+                      const routeAmount = position?.amount ?? formatTokenAmount(allAlphaBalances[displayNetuid] || '0');
+                      const routeApy = position?.apy ?? displayMeta.apy;
+                      const routeHotkey =
+                        position?.hotkey ?? stakedHotkeys[displayNetuid] ?? getHotkeyForNetuid(displayNetuid);
+
+                      return (
+                        <button
+                          key={displayNetuid}
+                          type="button"
+                          className={`sn-r ${isSelected ? 'sel' : ''}`}
+                          onClick={() =>
+                            stakingAction === 'stake'
+                              ? setNetuid(displayNetuid)
+                              : stakingAction === 'swap'
+                                ? setSwapTargetNetuid(displayNetuid)
+                                : setUnstakeNetuid(displayNetuid)
+                          }
+                        >
+                          <div className="sn-num">{displayMeta.code}</div>
+                          <div className="sn-info">
+                            <div className="sn-name">{displayMeta.name}</div>
+                            <div className="sn-cat">
+                              {sidePanelShowsCurrentPositions
+                                ? `Validator ${formatShortValue(routeHotkey, 8, 6)}`
+                                : displayMeta.category}
+                            </div>
                           </div>
-                          <div className="staking-position-card__value">
-                            <strong>{position.amount}</strong>
-                            <span>ALPHA</span>
+                          <div className={`sn-apy ${sidePanelShowsCurrentPositions ? 'sn-apy--stack' : ''}`}>
+                            {sidePanelShowsCurrentPositions ? (
+                              <>
+                                <span>{routeAmount}α</span>
+                                <small>{routeApy} APY</small>
+                              </>
+                            ) : (
+                              routeApy
+                            )}
                           </div>
-                        </div>
-                        <div className="staking-position-card__bottom">
-                          <span>Validator {formatShortValue(position.hotkey, 8, 6)}</span>
-                          <span className="staking-position-card__apy">Mock APY {position.apy}</span>
-                        </div>
-                      </button>
-                    ))}
+                          <div className="snr-radio" />
+                        </button>
+                      );
+                    })}
                   </div>
                 ) : (
-                  <div className="sn-list">
-                    {(stakingAction === 'unstake' ? activePositions.map(([id]) => Number(id)) : DISPLAY_SUBNETS.map((subnet) => subnet.netuid)).map(
-                      (displayNetuid) => {
-                        const displayMeta = getSubnetPresentation(displayNetuid);
-                        const isSelected =
-                          stakingAction === 'stake'
-                            ? netuid === displayNetuid
-                            : stakingAction === 'swap'
-                              ? swapTargetNetuid === displayNetuid
-                              : unstakeNetuid === displayNetuid;
-                        const routeAmount = allAlphaBalances[displayNetuid] || '0';
-
-                        return (
-                          <button
-                            key={displayNetuid}
-                            type="button"
-                            className={`sn-r ${isSelected ? 'sel' : ''}`}
-                            onClick={() =>
-                              stakingAction === 'stake'
-                                ? setNetuid(displayNetuid)
-                                : stakingAction === 'swap'
-                                  ? setSwapTargetNetuid(displayNetuid)
-                                  : setUnstakeNetuid(displayNetuid)
-                            }
-                          >
-                            <div className="sn-num">{displayMeta.code}</div>
-                            <div className="sn-info">
-                              <div className="sn-name">{displayMeta.name}</div>
-                              <div className="sn-cat">
-                                {stakingAction === 'unstake'
-                                  ? `Staked balance · ${formatTokenAmount(routeAmount)} ALPHA`
-                                  : displayMeta.category}
-                              </div>
-                            </div>
-                            <div className="sn-apy">
-                              {stakingAction === 'unstake' ? `${formatTokenAmount(routeAmount)}α` : displayMeta.apy}
-                            </div>
-                            <div className="snr-radio" />
-                          </button>
-                        );
-                      },
-                    )}
+                  <div className="staking-position-empty">
+                    {subnetSearchQuery
+                      ? sidePanelShowsCurrentPositions
+                        ? 'No matching positions.'
+                        : 'No matching testnet subnets.'
+                      : 'No current testnet staking positions found for this wallet.'}
+                  </div>
+                )}
+                {!sidePanelShowsCurrentPositions && sidePanelPageCount > 1 && (
+                  <div className="subnet-pagination">
+                    <span>
+                      Page {currentDestinationPage} of {sidePanelPageCount} · {filteredSidePanelRouteNetuids.length}
+                      {subnetSearchQuery ? ` of ${sidePanelRouteNetuids.length}` : ''} subnets
+                    </span>
+                    <div className="subnet-pagination__controls">
+                      <button
+                        type="button"
+                        onClick={() => setDestinationPage((page) => Math.max(1, page - 1))}
+                        disabled={currentDestinationPage === 1}
+                      >
+                        Prev
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDestinationPage((page) => Math.min(sidePanelPageCount, page + 1))}
+                        disabled={currentDestinationPage === sidePanelPageCount}
+                      >
+                        Next
+                      </button>
+                    </div>
                   </div>
                 )}
                 <div className="swap-side-footnote">
                   {stakingAction === 'stake'
-                    ? 'APY is mocked for now in this panel. The positions and validator routes themselves are sourced from your live on-chain stake.'
+                    ? stakingPositions.length > 0
+                      ? 'Positions and validator routes are sourced from live on-chain stake.'
+                      : 'Bittensor EVM testnet flows are live today. Solana, Ethereum, and other external-chain deposits are coming soon.'
                     : stakingAction === 'unstake'
-                    ? 'Unstaking returns native TAO to the connected wallet after the on-chain unbonding step.'
-                    : 'Bittensor EVM flows are live today. Solana, Ethereum, and other external-chain deposits are coming soon.'}
+                      ? 'Unstaking returns native testnet TAO to the connected wallet after the on-chain unbonding step.'
+                      : 'Bittensor EVM testnet flows are live today. Solana, Ethereum, and other external-chain deposits are coming soon.'}
                 </div>
               </div>
             </div>
@@ -2293,7 +2690,7 @@ function App() {
             <section className="tao-hero">
               <div className="tao-badge">
                 <span className="tao-badge__dot" />
-                Live on Bittensor EVM only
+                Live on Bittensor EVM testnet
               </div>
               <h1>
                 Bittensor DeFi.
@@ -2302,7 +2699,7 @@ function App() {
               </h1>
               <p>
                 Stake, unstake, and swap on Bittensor subnets using plain English. External-chain routes will land
-                later, but the live experience today stays focused on Bittensor EVM only.
+                later, but the live experience today stays focused on Bittensor EVM testnet.
               </p>
               <div className="tao-hero__actions">
                 <button type="button" className="tao-btn tao-btn--primary tao-btn--large" onClick={() => openApp()}>
@@ -2389,7 +2786,7 @@ function App() {
                 </p>
                 <p className="tao-vision__copy">
                   TaoChat makes it conversational. You tell it what you want in plain English and it handles the live
-                  Bittensor EVM flow cleanly, while upcoming external-chain routes stay clearly marked as coming soon.
+                  Bittensor EVM testnet flow cleanly, while upcoming external-chain routes stay clearly marked as coming soon.
                 </p>
                 <div className="tao-vision__points">
                   {VISION_POINTS.map((point) => (
@@ -2450,7 +2847,7 @@ function App() {
                   {
                     step: '1',
                     title: 'Connect wallet',
-                    description: 'Link a wallet that supports the current Bittensor EVM flow.',
+                    description: 'Link a wallet that supports the current Bittensor EVM testnet flow.',
                   },
                   {
                     step: '2',
@@ -2570,11 +2967,6 @@ function App() {
                 <span className="app-sidebar__icon">☰</span>
                 History
               </button>
-              <div className="app-sidebar__nav-item is-disabled">
-                <span className="app-sidebar__icon">⬡</span>
-                Research
-                <span className="soon-chip">Soon</span>
-              </div>
             </nav>
 
             <div className="app-sidebar__footer">
@@ -2587,7 +2979,7 @@ function App() {
                   <div className="wpill">
                     <div className="wdot" />
                     <div className="waddr">{formatShortValue(account, 6, 4)}</div>
-                    <div className="wnet">EVM</div>
+                    <div className="wnet">Testnet</div>
                   </div>
                   <button type="button" className="sidebar-disconnect" onClick={disconnectWallet}>
                     Disconnect
@@ -2618,6 +3010,7 @@ function App() {
                 myAlphaBalance={myAlphaBalance}
                 allAlphaBalances={allAlphaBalances}
                 currentNetuid={netuid}
+                simulateStakeAlpha={simulateStakeAlpha}
                 executeStake={executeStake}
                 executeUnstake={executeUnstake}
                 executeSwap={executeSwap}
