@@ -4,6 +4,10 @@ import { blake2b } from 'blakejs';
 import {
   Activity,
   AlertCircle,
+  ArrowLeft,
+  History as HistoryIcon,
+  MessageCircle,
+  Repeat2,
   Search,
   X,
 } from 'lucide-react';
@@ -663,6 +667,12 @@ const decodeSimSwapAlphaAmount = (scaleBytes: unknown) => {
   return alphaAmountRao === null ? null : ethers.formatUnits(alphaAmountRao, 9);
 };
 
+const decodeSimSwapTaoAmount = (scaleBytes: unknown) => {
+  const bytes = bytesFromScaleResult(scaleBytes);
+  const taoAmountRao = decodeSimSwapOutputRao(bytes, 0);
+  return taoAmountRao === null ? null : ethers.formatUnits(taoAmountRao, 9);
+};
+
 const getTimestampFromNonce = (nonce?: string) => {
   if (!nonce) return Date.now();
 
@@ -857,6 +867,8 @@ function App() {
   const [swapTargetNetuid, setSwapTargetNetuid] = useState<number>(19);
   const [swapAlphaEstimate, setSwapAlphaEstimate] = useState<SwapAlphaSimulation | null>(null);
   const [isSwapEstimateLoading, setIsSwapEstimateLoading] = useState(false);
+  const [unstakeTaoEstimate, setUnstakeTaoEstimate] = useState<string | null>(null);
+  const [isUnstakeEstimateLoading, setIsUnstakeEstimateLoading] = useState(false);
   const [destinationPage, setDestinationPage] = useState(1);
   const [subnetSearchQuery, setSubnetSearchQuery] = useState('');
 
@@ -1055,6 +1067,30 @@ function App() {
       };
     } catch (error) {
       console.error('Failed to simulate subnet rotation:', error);
+      return null;
+    }
+  };
+
+  const simulateUnstakeTao = async (sourceNetuid: number, amount: string): Promise<string | null> => {
+    const numericAmount = Number.parseFloat(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || sourceNetuid < 0) {
+      return null;
+    }
+
+    try {
+      const amountInRao = ethers.parseUnits(amount, 9);
+      const amountParam = Number(amountInRao);
+
+      if (!Number.isSafeInteger(amountParam) || amountParam <= 0) {
+        return null;
+      }
+
+      const simulation = await withRpcBackoff(() =>
+        directProvider.send('swap_simSwapAlphaForTao', [sourceNetuid, amountParam]),
+      );
+      return decodeSimSwapTaoAmount(simulation);
+    } catch (error) {
+      console.error('Failed to simulate unstake output:', error);
       return null;
     }
   };
@@ -1358,7 +1394,8 @@ function App() {
   }, [netuid, account, provider, surface, appView]);
 
   useEffect(() => {
-    setDestinationPage(1);
+    const timer = window.setTimeout(() => setDestinationPage(1), 0);
+    return () => window.clearTimeout(timer);
   }, [stakingAction, availableNetuids.length, subnetSearchQuery]);
 
   useEffect(() => {
@@ -1370,21 +1407,39 @@ function App() {
     ].find((candidateNetuid) => candidateNetuid > 0 && candidateNetuid !== swapSourceNetuid);
 
     if (fallbackTarget !== undefined) {
-      setSwapTargetNetuid(fallbackTarget);
+      const timer = window.setTimeout(() => {
+        setSwapTargetNetuid((currentTargetNetuid) =>
+          currentTargetNetuid === swapSourceNetuid ? fallbackTarget : currentTargetNetuid,
+        );
+      }, 0);
+
+      return () => window.clearTimeout(timer);
     }
   }, [swapSourceNetuid, swapTargetNetuid, availableNetuids]);
 
   useEffect(() => {
+    let cancelled = false;
+
     if (surface !== 'app' || appView !== 'dashboard' || stakingAction !== 'stake' || !stakeAmount) {
-      setStakeAlphaEstimate(null);
-      setIsStakeEstimateLoading(false);
-      return undefined;
+      const clearTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        setStakeAlphaEstimate(null);
+        setIsStakeEstimateLoading(false);
+      }, 0);
+
+      return () => {
+        cancelled = true;
+        window.clearTimeout(clearTimer);
+      };
     }
 
-    let cancelled = false;
-    setIsStakeEstimateLoading(true);
+    const loadingTimer = window.setTimeout(() => {
+      if (!cancelled) {
+        setIsStakeEstimateLoading(true);
+      }
+    }, 0);
 
-    const timer = window.setTimeout(() => {
+    const estimateTimer = window.setTimeout(() => {
       void simulateStakeAlpha(stakeAmount, netuid).then((estimate) => {
         if (cancelled) return;
         setStakeAlphaEstimate(estimate);
@@ -1394,13 +1449,14 @@ function App() {
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      window.clearTimeout(loadingTimer);
+      window.clearTimeout(estimateTimer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stakeAmount, netuid, stakingAction, surface, appView]);
 
   useEffect(() => {
     const amountToQuote = swapAmount || allAlphaBalances[swapSourceNetuid] || '';
+    let cancelled = false;
 
     if (
       surface !== 'app' ||
@@ -1409,15 +1465,25 @@ function App() {
       !amountToQuote ||
       swapSourceNetuid === swapTargetNetuid
     ) {
-      setSwapAlphaEstimate(null);
-      setIsSwapEstimateLoading(false);
-      return undefined;
+      const clearTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        setSwapAlphaEstimate(null);
+        setIsSwapEstimateLoading(false);
+      }, 0);
+
+      return () => {
+        cancelled = true;
+        window.clearTimeout(clearTimer);
+      };
     }
 
-    let cancelled = false;
-    setIsSwapEstimateLoading(true);
+    const loadingTimer = window.setTimeout(() => {
+      if (!cancelled) {
+        setIsSwapEstimateLoading(true);
+      }
+    }, 0);
 
-    const timer = window.setTimeout(() => {
+    const estimateTimer = window.setTimeout(() => {
       void simulateSwapAlpha(swapSourceNetuid, swapTargetNetuid, amountToQuote).then((estimate) => {
         if (cancelled) return;
         setSwapAlphaEstimate(estimate);
@@ -1427,10 +1493,53 @@ function App() {
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      window.clearTimeout(loadingTimer);
+      window.clearTimeout(estimateTimer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [swapAmount, swapSourceNetuid, swapTargetNetuid, stakingAction, surface, appView, allAlphaBalances]);
+
+  useEffect(() => {
+    const amountToQuote = unstakeAmount || allAlphaBalances[unstakeNetuid] || '';
+    let cancelled = false;
+
+    if (
+      surface !== 'app' ||
+      appView !== 'dashboard' ||
+      stakingAction !== 'unstake' ||
+      !amountToQuote
+    ) {
+      const clearTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        setUnstakeTaoEstimate(null);
+        setIsUnstakeEstimateLoading(false);
+      }, 0);
+
+      return () => {
+        cancelled = true;
+        window.clearTimeout(clearTimer);
+      };
+    }
+
+    const loadingTimer = window.setTimeout(() => {
+      if (!cancelled) {
+        setIsUnstakeEstimateLoading(true);
+      }
+    }, 0);
+
+    const estimateTimer = window.setTimeout(() => {
+      void simulateUnstakeTao(unstakeNetuid, amountToQuote).then((estimate) => {
+        if (cancelled) return;
+        setUnstakeTaoEstimate(estimate);
+        setIsUnstakeEstimateLoading(false);
+      });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(loadingTimer);
+      window.clearTimeout(estimateTimer);
+    };
+  }, [unstakeAmount, unstakeNetuid, stakingAction, surface, appView, allAlphaBalances]);
 
   const clearWalletState = () => {
     setIsWalletHydrating(false);
@@ -1451,6 +1560,8 @@ function App() {
     setIsStakeEstimateLoading(false);
     setSwapAlphaEstimate(null);
     setIsSwapEstimateLoading(false);
+    setUnstakeTaoEstimate(null);
+    setIsUnstakeEstimateLoading(false);
     setSubnetNamesByNetuid({});
     setAvailableNetuids(DISPLAY_SUBNETS.map((subnet) => subnet.netuid));
     setDestinationPage(1);
@@ -2036,13 +2147,17 @@ function App() {
   useEffect(() => {
     if (stakingAction !== 'swap' || activePositions.length === 0) return;
 
-    const sourceStillAvailable = activePositions.some(([id]) => Number(id) === swapSourceNetuid);
-    if (!sourceStillAvailable) {
-      const nextSourceNetuid = activePositions[0]?.[0];
-      if (nextSourceNetuid !== undefined) {
-        setSwapSourceNetuid(Number(nextSourceNetuid));
+    const timer = window.setTimeout(() => {
+      const sourceStillAvailable = activePositions.some(([id]) => Number(id) === swapSourceNetuid);
+      if (!sourceStillAvailable) {
+        const nextSourceNetuid = activePositions[0]?.[0];
+        if (nextSourceNetuid !== undefined) {
+          setSwapSourceNetuid(Number(nextSourceNetuid));
+        }
       }
-    }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stakingAction, swapSourceNetuid, allAlphaBalances]);
 
@@ -2196,7 +2311,10 @@ function App() {
     const stakeAmountValue = Number.parseFloat(stakeAmount || '0');
     const swapAmountValue = Number.parseFloat(swapAmount || allAlphaBalances[swapSourceNetuid] || '0');
     const swapTargetAmountValue = Number.parseFloat(swapAlphaEstimate?.targetAlpha ?? String(swapAmountValue));
-    const unstakeAmountValue = Number.parseFloat(unstakeAmount || allAlphaBalances[unstakeNetuid] || '0');
+    const unstakeAmountToQuote = unstakeAmount || allAlphaBalances[unstakeNetuid] || '';
+    const unstakeReceiveAmount = unstakeTaoEstimate ?? '';
+    const unstakeReceiveValue = Number.parseFloat(unstakeReceiveAmount || '0');
+    const unstakeReceiveAfterGas = Math.max(unstakeReceiveValue - 0.0004, 0);
     const selectedApy = Number.parseFloat(
       (stakingAction === 'stake'
         ? selectedStakeSubnet.apy
@@ -2206,7 +2324,7 @@ function App() {
       ).replace('%', ''),
     );
     const simulationBase =
-      stakingAction === 'stake' ? stakeAmountValue : stakingAction === 'swap' ? swapTargetAmountValue : unstakeAmountValue;
+      stakingAction === 'stake' ? stakeAmountValue : stakingAction === 'swap' ? swapTargetAmountValue : unstakeReceiveValue;
     const thirtyDayReturn = (simulationBase * selectedApy) / 12 / 100;
     const ninetyDayReturn = (simulationBase * selectedApy) / 4 / 100;
     const yearlyReturn = (simulationBase * selectedApy) / 100;
@@ -2475,15 +2593,16 @@ function App() {
                       <div className="tok-amt" style={stakingAction !== 'unstake' ? { color: 'var(--text-2)' } : undefined}>
                         ≈
                         {(stakingAction === 'stake' && isStakeEstimateLoading) ||
-                        (stakingAction === 'swap' && isSwapEstimateLoading)
+                        (stakingAction === 'swap' && isSwapEstimateLoading) ||
+                        (stakingAction === 'unstake' && isUnstakeEstimateLoading)
                           ? '...'
                           : formatTokenAmount(
                               stakingAction === 'stake'
                                 ? stakeAlphaEstimate ?? '0'
                                 : stakingAction === 'swap'
                                   ? swapAlphaEstimate?.targetAlpha ?? '0'
-                                  : unstakeAmount || allAlphaBalances[unstakeNetuid] || '0',
-                              stakingAction === 'stake' || stakingAction === 'swap' ? 6 : 4,
+                                  : unstakeReceiveAmount || '0',
+                              stakingAction === 'stake' || stakingAction === 'swap' || stakingAction === 'unstake' ? 6 : 4,
                             )}
                       </div>
                       <div className="tok-usd">
@@ -2493,9 +2612,11 @@ function App() {
                             : `Staked on ${selectedStakeSubnet.code}`
                           : stakingAction === 'swap'
                             ? swapAlphaEstimate
-                              ? `Simulated on ${selectedSwapTargetSubnet.code}`
-                              : `Move to ${selectedSwapTargetSubnet.code}`
-                            : 'Returned to connected wallet'}
+                            ? `Simulated on ${selectedSwapTargetSubnet.code}`
+                            : `Move to ${selectedSwapTargetSubnet.code}`
+                            : unstakeTaoEstimate
+                              ? `Simulated from ${selectedUnstakeSubnet.code}`
+                              : 'Returned to connected wallet'}
                       </div>
                     </div>
                   </div>
@@ -2559,6 +2680,18 @@ function App() {
                         <span>{getUiSubnetLabel(unstakeNetuid)}</span>
                       </div>
                       <div className="det-row">
+                        <span>Simulated TAO receive</span>
+                        <span style={{ color: 'var(--success)' }}>
+                          {isUnstakeEstimateLoading
+                            ? 'Simulating...'
+                            : unstakeTaoEstimate
+                              ? `≈${formatTokenAmount(unstakeTaoEstimate, 6)} TAO`
+                              : unstakeAmountToQuote
+                                ? 'Quote unavailable'
+                                : 'Enter amount'}
+                        </span>
+                      </div>
+                      <div className="det-row">
                         <span>Unbonding</span>
                         <span>~12 seconds</span>
                       </div>
@@ -2577,29 +2710,56 @@ function App() {
                 <div className="swap-sim">
                   <div className="swap-sim-t">
                     {stakingAction === 'unstake'
-                      ? 'Estimated unlocked TAO'
+                      ? 'Simulated unlocked TAO'
                       : `Projected returns at ${selectedApy.toFixed(1)}% ${APY_LABEL}`}
                   </div>
-                  <div className="swap-sim-g">
-                    <div className="ssim">
-                      <div className="ssim-p">30 days</div>
-                      <div className="ssim-v">
-                        {stakingAction === 'unstake' ? formatTokenAmount(String(simulationBase)) : `+${formatTokenAmount(String(thirtyDayReturn))}`}
+                  {stakingAction === 'unstake' ? (
+                    <div className="swap-sim-g swap-sim-g--unstake">
+                      <div className="ssim">
+                        <div className="ssim-p">Receive</div>
+                        <div className="ssim-v">
+                          {isUnstakeEstimateLoading
+                            ? '...'
+                            : unstakeTaoEstimate
+                              ? `≈${formatTokenAmount(unstakeTaoEstimate, 6)}`
+                              : unstakeAmountToQuote
+                                ? 'Unavailable'
+                                : '0'}
+                        </div>
+                      </div>
+                      <div className="ssim">
+                        <div className="ssim-p">Network gas</div>
+                        <div className="ssim-v">~0.0004</div>
+                      </div>
+                      <div className="ssim">
+                        <div className="ssim-p">Wallet gets</div>
+                        <div className="ssim-v">
+                          {isUnstakeEstimateLoading
+                            ? '...'
+                            : unstakeTaoEstimate
+                              ? `≈${formatTokenAmount(String(unstakeReceiveAfterGas), 6)}`
+                              : unstakeAmountToQuote
+                                ? 'Unavailable'
+                                : '0'}
+                        </div>
                       </div>
                     </div>
-                    <div className="ssim">
-                      <div className="ssim-p">90 days</div>
-                      <div className="ssim-v">
-                        {stakingAction === 'unstake' ? formatTokenAmount(String(simulationBase)) : `+${formatTokenAmount(String(ninetyDayReturn))}`}
+                  ) : (
+                    <div className="swap-sim-g">
+                      <div className="ssim">
+                        <div className="ssim-p">30 days</div>
+                        <div className="ssim-v">+{formatTokenAmount(String(thirtyDayReturn))}</div>
+                      </div>
+                      <div className="ssim">
+                        <div className="ssim-p">90 days</div>
+                        <div className="ssim-v">+{formatTokenAmount(String(ninetyDayReturn))}</div>
+                      </div>
+                      <div className="ssim">
+                        <div className="ssim-p">1 year</div>
+                        <div className="ssim-v">+{formatTokenAmount(String(yearlyReturn))}</div>
                       </div>
                     </div>
-                    <div className="ssim">
-                      <div className="ssim-p">1 year</div>
-                      <div className="ssim-v">
-                        {stakingAction === 'unstake' ? formatTokenAmount(String(simulationBase)) : `+${formatTokenAmount(String(yearlyReturn))}`}
-                      </div>
-                    </div>
-                  </div>
+                  )}
                 </div>
 
                 {stakingAction === 'stake' && (
@@ -2827,28 +2987,30 @@ function App() {
         </button>
       </div>
 
-      <div className="frow">
-        {[
-          { id: 'all' as const, label: 'All' },
-          { id: 'stake' as const, label: 'Stakes' },
-          { id: 'unstake' as const, label: 'Unstakes' },
-          { id: 'swap' as const, label: 'Moves' },
-        ].map((filter) => (
-          <button
-            key={filter.id}
-            type="button"
-            className={`fp ${historyFilter === filter.id ? 'on' : ''}`}
-            onClick={() => {
-              setHistoryFilter(filter.id);
-              setHistoryPage(1);
-            }}
-          >
-            {filter.label}
-          </button>
-        ))}
-      </div>
+      <div className="history-subbar">
+        <div className="frow">
+          {[
+            { id: 'all' as const, label: 'All' },
+            { id: 'stake' as const, label: 'Stakes' },
+            { id: 'unstake' as const, label: 'Unstakes' },
+            { id: 'swap' as const, label: 'Moves' },
+          ].map((filter) => (
+            <button
+              key={filter.id}
+              type="button"
+              className={`fp ${historyFilter === filter.id ? 'on' : ''}`}
+              onClick={() => {
+                setHistoryFilter(filter.id);
+                setHistoryPage(1);
+              }}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
 
-      <div className="history-note">{historyNote}</div>
+        <div className="history-note">{historyNote}</div>
+      </div>
 
       {isHistoryLoading ? (
         <div className="empty">
@@ -2858,46 +3020,56 @@ function App() {
         </div>
       ) : filteredHistory.length > 0 ? (
         <>
-          <table className="htable">
-            <thead>
-              <tr>
-                <th style={{ width: '130px' }}>Date</th>
-                <th style={{ width: '110px' }}>Type</th>
-                <th>Details</th>
-                <th style={{ width: '120px' }}>Amount</th>
-                <th style={{ width: '85px' }}>Status</th>
-                <th style={{ width: '105px' }}>Tx Hash</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedHistory.map((event) => (
-                <tr key={`${event.txHash}-${event.timestamp}`}>
-                  <td style={{ color: 'var(--text-2)' }}>{formatHistoryTime(event.timestamp)}</td>
-                  <td>
-                    <span className={`tt ${event.type === 'stake' ? 'tt-s' : event.type === 'unstake' ? 'tt-u' : 'tt-x'}`}>
-                      {event.type === 'stake' ? '↑ Stake' : event.type === 'unstake' ? '↓ Unstake' : '⇄ Move'}
-                    </span>
-                  </td>
-                  <td>{event.detail}</td>
-                  <td className={event.type === 'unstake' ? 'amt-n' : 'amt-p'}>
-                    {event.type === 'unstake' ? '−' : '+'}
-                    {event.amount}
-                  </td>
-                  <td className="tx-ok">✓ Done</td>
-                  <td>
-                    <a
-                      href={`${EXPLORER_BASE_URL}${event.txHash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="tx-hash"
-                    >
-                      {formatShortValue(event.txHash, 10, 6)}
-                    </a>
-                  </td>
+          <div className="history-table-shell">
+            <table className="htable">
+              <colgroup>
+                <col className="history-col-date" />
+                <col className="history-col-type" />
+                <col className="history-col-details" />
+                <col className="history-col-amount" />
+                <col className="history-col-status" />
+                <col className="history-col-hash" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Details</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Tx Hash</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {paginatedHistory.map((event) => (
+                  <tr key={`${event.txHash}-${event.timestamp}`}>
+                    <td data-label="Date" style={{ color: 'var(--text-2)' }}>{formatHistoryTime(event.timestamp)}</td>
+                    <td data-label="Type">
+                      <span className={`tt ${event.type === 'stake' ? 'tt-s' : event.type === 'unstake' ? 'tt-u' : 'tt-x'}`}>
+                        {event.type === 'stake' ? '↑ Stake' : event.type === 'unstake' ? '↓ Unstake' : '⇄ Move'}
+                      </span>
+                    </td>
+                    <td data-label="Details">{event.detail}</td>
+                    <td data-label="Amount" className={event.type === 'unstake' ? 'amt-n' : 'amt-p'}>
+                      {event.type === 'unstake' ? '−' : '+'}
+                      {event.amount}
+                    </td>
+                    <td data-label="Status" className="tx-ok">✓ Done</td>
+                    <td data-label="Tx Hash">
+                      <a
+                        href={`${EXPLORER_BASE_URL}${event.txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="tx-hash"
+                      >
+                        {formatShortValue(event.txHash, 10, 6)}
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div className="history-pagination">
             <div className="history-pagination__range">
@@ -3236,7 +3408,7 @@ function App() {
                 className={`app-sidebar__nav-item ${appView === 'chat' ? 'is-active' : ''}`}
                 onClick={() => setAppView('chat')}
               >
-                <span className="app-sidebar__icon">⌘</span>
+                <span className="app-sidebar__icon"><MessageCircle size={16} /></span>
                 Chat
               </button>
               <button
@@ -3244,7 +3416,7 @@ function App() {
                 className={`app-sidebar__nav-item ${appView === 'dashboard' ? 'is-active' : ''}`}
                 onClick={() => setAppView('dashboard')}
               >
-                <span className="app-sidebar__icon">⇄</span>
+                <span className="app-sidebar__icon"><Repeat2 size={16} /></span>
                 Swap
               </button>
               <button
@@ -3255,14 +3427,15 @@ function App() {
                   void fetchOnchainHistory(account || undefined);
                 }}
               >
-                <span className="app-sidebar__icon">☰</span>
+                <span className="app-sidebar__icon"><HistoryIcon size={16} /></span>
                 History
               </button>
             </nav>
 
             <div className="app-sidebar__footer">
               <button type="button" className="back-link" onClick={() => setSurface('landing')}>
-                ← Back to site
+                <ArrowLeft size={14} />
+                Back to site
               </button>
 
               {account ? (
