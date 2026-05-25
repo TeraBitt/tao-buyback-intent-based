@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import type { ChatSession, FunctionDeclaration, GenerateContentResult } from '@google/generative-ai';
-import { Activity, Send, ShieldAlert, Wallet } from 'lucide-react';
+import { Activity, Send, ShieldAlert } from 'lucide-react';
 
 interface ChatPortalProps {
   account: string;
@@ -114,8 +114,6 @@ export default function ChatPortal({
   executeUnstake,
   executeSwap,
   status,
-  openWalletSelector,
-  disconnectWallet,
 }: ChatPortalProps) {
   const initialMessage = import.meta.env.VITE_GEMINI_API_KEY
     ? "Hey! I'm TaoChat — I can help you stake, unstake, swap, and research Bittensor subnets in plain English."
@@ -130,11 +128,11 @@ export default function ChatPortal({
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
   const model = apiKey
     ? new GoogleGenerativeAI(apiKey).getGenerativeModel({
-        model: 'gemini-2.5-flash',
-        tools: [{ functionDeclarations: [stakeTool, unstakeTool, swapTool, checkBalancesTool] }],
-        systemInstruction:
-          'You are TaoChat for a Bittensor staking dashboard. Help users stake TAO, unstake Alpha, and move positions between Bittensor subnets. Cross-chain deposits are not live yet, so if a user asks about SOL, ETH, bridging, or cross-chain, clearly say it is coming soon and steer them toward the live on-chain staking flows. Be concise, clear, and action-oriented. When the user wants to act, always call the provided tool instead of only describing the action.',
-      })
+      model: 'gemini-2.5-flash',
+      tools: [{ functionDeclarations: [stakeTool, unstakeTool, swapTool, checkBalancesTool] }],
+      systemInstruction:
+        'You are TaoChat for a Bittensor staking dashboard. Help users stake TAO, unstake Alpha, and move positions between Bittensor subnets. Cross-chain deposits are not live yet, so if a user asks about SOL, ETH, bridging, or cross-chain, clearly say it is coming soon and steer them toward the live on-chain staking flows. Be concise, clear, and action-oriented. When the user wants to act, always call the provided tool instead of only describing the action.',
+    })
     : null;
 
   const [chatSession] = useState<ChatSession | null>(() => (model ? model.startChat({ history: [] }) : null));
@@ -148,11 +146,6 @@ export default function ChatPortal({
     if (!element) return;
     element.style.height = 'auto';
     element.style.height = `${Math.min(element.scrollHeight, 160)}px`;
-  };
-
-  const formatShortValue = (value: string, start = 6, end = 4) => {
-    if (!value) return '';
-    return `${value.slice(0, start)}...${value.slice(-end)}`;
   };
 
   const formatTokenAmount = (value?: string, digits = 6) => {
@@ -368,221 +361,200 @@ export default function ChatPortal({
       <div className="chat-head">
         <div className="chat-head-l">
           <div className="ch-title">TaoChat</div>
-          <div className="ch-sub">{account ? 'Bittensor EVM testnet connected' : 'Bittensor EVM testnet · connect wallet'}</div>
+          <div className="ch-sub">{account ? 'Bittensor EVM testnet connected' : 'Bittensor EVM testnet · connect wallet in sidebar'}</div>
         </div>
-
-        {account ? (
-          <div className="wallet-inline-actions">
-            <div className="wpill" style={{ padding: '5px 10px' }}>
-              <div className="wdot" />
-              <span style={{ fontSize: '12px', color: 'var(--text-2)', fontFamily: 'monospace' }}>
-                {formatShortValue(account, 6, 4)}
-              </span>
-            </div>
-            <button type="button" className="tao-btn tao-btn--ghost tao-btn--small" onClick={disconnectWallet}>
-              Disconnect
-            </button>
-          </div>
-        ) : (
-          <button type="button" className="tao-btn tao-btn--primary tao-btn--small" onClick={openWalletSelector}>
-            <Wallet size={16} />
-            Connect wallet
-          </button>
-        )}
       </div>
 
       <div className={`chat-body ${isIntroState ? 'chat-body--intro' : 'chat-body--conversation'}`}>
-        {!account && (
-          <div className="chat-inline-banner">
-            <ShieldAlert size={16} />
-            <span>Live today: Bittensor EVM testnet staking, unstaking, and subnet rotation. External-chain deposits are coming soon.</span>
-          </div>
-        )}
+        <div className="chat-inline-banner">
+          <ShieldAlert size={16} />
+          <span>Live today: Bittensor EVM testnet staking, unstaking, and subnet rotation. External-chain deposits are coming soon.</span>
+        </div>
 
         <div className={isIntroState ? 'chat-intro-grid' : 'chat-conversation-grid'}>
           <div className="chat-msgs">
-        {messages.map((message, index) => (
-          <div key={`${message.role}-${index}`} className={`msg ${message.role === 'user' ? 'user' : ''}`}>
-            <div className={`av ${message.role === 'user' ? 'av-u' : 'av-b'}`}>{message.role === 'user' ? 'U' : 'T'}</div>
+            {messages.map((message, index) => (
+              <div key={`${message.role}-${index}`} className={`msg ${message.role === 'user' ? 'user' : ''}`}>
+                <div className={`av ${message.role === 'user' ? 'av-u' : 'av-b'}`}>{message.role === 'user' ? 'U' : 'T'}</div>
 
-            <div className={`bub ${message.role === 'user' ? 'user' : 'bot'}`}>
-              <div className="chat-markdown">
-                <ReactMarkdown>{message.text}</ReactMarkdown>
-              </div>
-
-              {message.action && (
-                <div className="tcard">
-                  <div className="tcard-head">
-                    <span className="tcard-head-ic">
-                      {message.action.type === 'stake' ? '↑' : message.action.type === 'unstake' ? '↓' : '⇄'}
-                    </span>
-                    <span className="tcard-head-t">
-                      {message.action.type === 'stake'
-                        ? 'Stake confirmation'
-                        : message.action.type === 'unstake'
-                          ? 'Unstake confirmation'
-                          : 'Subnet rotation'}
-                    </span>
+                <div className={`bub ${message.role === 'user' ? 'user' : 'bot'}`}>
+                  <div className="chat-markdown">
+                    <ReactMarkdown>{message.text}</ReactMarkdown>
                   </div>
 
-                  <div className="tcard-body">
-                    {message.action.type === 'stake' && (
-                      <>
-                        <div className="trow">
-                          <span className="trow-k">Action</span>
-                          <span className="trow-v">Stake TAO</span>
-                        </div>
-                        <div className="trow">
-                          <span className="trow-k">Amount</span>
-                          <span className="trow-v">{message.action.amount} TAO</span>
-                        </div>
-                        <div className="trow">
-                          <span className="trow-k">Subnet</span>
-                          <span className="trow-v trow-vo">Netuid {message.action.netuid}</span>
-                        </div>
-                        <div className="trow">
-                          <span className="trow-k">Estimated receive</span>
-                          <span className="trow-v trow-vg">
-                            {message.action.estimatedAlpha
-                              ? `≈${formatTokenAmount(message.action.estimatedAlpha)} ALPHA`
-                              : 'Simulation unavailable'}
-                          </span>
-                        </div>
-                      </>
-                    )}
+                  {message.action && (
+                    <div className="tcard">
+                      <div className="tcard-head">
+                        <span className="tcard-head-ic">
+                          {message.action.type === 'stake' ? '↑' : message.action.type === 'unstake' ? '↓' : '⇄'}
+                        </span>
+                        <span className="tcard-head-t">
+                          {message.action.type === 'stake'
+                            ? 'Stake confirmation'
+                            : message.action.type === 'unstake'
+                              ? 'Unstake confirmation'
+                              : 'Subnet rotation'}
+                        </span>
+                      </div>
 
-                    {message.action.type === 'unstake' && (
-                      <>
-                        <div className="trow">
-                          <span className="trow-k">Action</span>
-                          <span className="trow-v">Unstake ALPHA</span>
-                        </div>
-                        <div className="trow">
-                          <span className="trow-k">Amount</span>
-                          <span className="trow-v">{message.action.amount ? `${message.action.amount} ALPHA` : 'All ALPHA'}</span>
-                        </div>
-                        <div className="trow">
-                          <span className="trow-k">From</span>
-                          <span className="trow-v trow-vo">Netuid {message.action.netuid}</span>
-                        </div>
-                        <div className="trow">
-                          <span className="trow-k">Estimated receive</span>
-                          <span className="trow-v trow-vg">
-                            {message.action.estimatedTao
-                              ? `≈${formatTokenAmount(message.action.estimatedTao)} TAO`
-                              : 'Simulation unavailable'}
-                          </span>
-                        </div>
-                      </>
-                    )}
-
-                    {message.action.type === 'swap' && (
-                      <>
-                        <div className="trow">
-                          <span className="trow-k">Action</span>
-                          <span className="trow-v">Move ALPHA</span>
-                        </div>
-                        <div className="trow">
-                          <span className="trow-k">Amount</span>
-                          <span className="trow-v">{message.action.amount} ALPHA</span>
-                        </div>
-                        <div className="trow">
-                          <span className="trow-k">From</span>
-                          <span className="trow-v">Netuid {message.action.netuid}</span>
-                        </div>
-                        <div className="trow">
-                          <span className="trow-k">To</span>
-                          <span className="trow-v trow-vo">Netuid {message.action.targetNetuid}</span>
-                        </div>
-                        <div className="trow">
-                          <span className="trow-k">Estimated receive</span>
-                          <span className="trow-v trow-vg">
-                            {message.action.estimatedAlpha
-                              ? `≈${formatTokenAmount(message.action.estimatedAlpha)} ALPHA`
-                              : 'Simulation unavailable'}
-                          </span>
-                        </div>
-                        {message.action.intermediateTao && (
-                          <div className="trow">
-                            <span className="trow-k">Route value</span>
-                            <span className="trow-v">via ≈{formatTokenAmount(message.action.intermediateTao)} TAO</span>
-                          </div>
+                      <div className="tcard-body">
+                        {message.action.type === 'stake' && (
+                          <>
+                            <div className="trow">
+                              <span className="trow-k">Action</span>
+                              <span className="trow-v">Stake TAO</span>
+                            </div>
+                            <div className="trow">
+                              <span className="trow-k">Amount</span>
+                              <span className="trow-v">{message.action.amount} TAO</span>
+                            </div>
+                            <div className="trow">
+                              <span className="trow-k">Subnet</span>
+                              <span className="trow-v trow-vo">Netuid {message.action.netuid}</span>
+                            </div>
+                            <div className="trow">
+                              <span className="trow-k">Estimated receive</span>
+                              <span className="trow-v trow-vg">
+                                {message.action.estimatedAlpha
+                                  ? `≈${formatTokenAmount(message.action.estimatedAlpha)} ALPHA`
+                                  : 'Simulation unavailable'}
+                              </span>
+                            </div>
+                          </>
                         )}
-                      </>
-                    )}
-                  </div>
 
-                  <div className="tcard-actions">
-                    <button
-                      type="button"
-                      className="btn-confirm"
-                      onClick={() => message.action && handleAction(message.action)}
-                      disabled={!account || status.type === 'loading'}
-                    >
-                      {message.action.type === 'stake'
-                        ? 'Confirm & stake →'
-                        : message.action.type === 'unstake'
-                          ? 'Confirm & unstake →'
-                          : 'Confirm move →'}
-                    </button>
-                    <button type="button" className="btn-cancel" onClick={() => dismissAction(index)}>
-                      Cancel
-                    </button>
-                  </div>
+                        {message.action.type === 'unstake' && (
+                          <>
+                            <div className="trow">
+                              <span className="trow-k">Action</span>
+                              <span className="trow-v">Unstake ALPHA</span>
+                            </div>
+                            <div className="trow">
+                              <span className="trow-k">Amount</span>
+                              <span className="trow-v">{message.action.amount ? `${message.action.amount} ALPHA` : 'All ALPHA'}</span>
+                            </div>
+                            <div className="trow">
+                              <span className="trow-k">From</span>
+                              <span className="trow-v trow-vo">Netuid {message.action.netuid}</span>
+                            </div>
+                            <div className="trow">
+                              <span className="trow-k">Estimated receive</span>
+                              <span className="trow-v trow-vg">
+                                {message.action.estimatedTao
+                                  ? `≈${formatTokenAmount(message.action.estimatedTao)} TAO`
+                                  : 'Simulation unavailable'}
+                              </span>
+                            </div>
+                          </>
+                        )}
+
+                        {message.action.type === 'swap' && (
+                          <>
+                            <div className="trow">
+                              <span className="trow-k">Action</span>
+                              <span className="trow-v">Move ALPHA</span>
+                            </div>
+                            <div className="trow">
+                              <span className="trow-k">Amount</span>
+                              <span className="trow-v">{message.action.amount} ALPHA</span>
+                            </div>
+                            <div className="trow">
+                              <span className="trow-k">From</span>
+                              <span className="trow-v">Netuid {message.action.netuid}</span>
+                            </div>
+                            <div className="trow">
+                              <span className="trow-k">To</span>
+                              <span className="trow-v trow-vo">Netuid {message.action.targetNetuid}</span>
+                            </div>
+                            <div className="trow">
+                              <span className="trow-k">Estimated receive</span>
+                              <span className="trow-v trow-vg">
+                                {message.action.estimatedAlpha
+                                  ? `≈${formatTokenAmount(message.action.estimatedAlpha)} ALPHA`
+                                  : 'Simulation unavailable'}
+                              </span>
+                            </div>
+                            {message.action.intermediateTao && (
+                              <div className="trow">
+                                <span className="trow-k">Route value</span>
+                                <span className="trow-v">via ≈{formatTokenAmount(message.action.intermediateTao)} TAO</span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      <div className="tcard-actions">
+                        <button
+                          type="button"
+                          className="btn-confirm"
+                          onClick={() => message.action && handleAction(message.action)}
+                          disabled={!account || status.type === 'loading'}
+                        >
+                          {message.action.type === 'stake'
+                            ? 'Confirm & stake →'
+                            : message.action.type === 'unstake'
+                              ? 'Confirm & unstake →'
+                              : 'Confirm move →'}
+                        </button>
+                        <button type="button" className="btn-cancel" onClick={() => dismissAction(index)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+            ))}
+
+            {loading && (
+              <div className="thinking-row">
+                <Activity size={16} />
+                Thinking through the route...
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className="chat-input-area">
+            <div className="input-hints">
+              {INPUT_HINTS.map((hint) => (
+                <button key={hint.label} type="button" className="hint" onClick={() => setInput(hint.prompt)}>
+                  {hint.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="chat-input-row">
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                className="chat-textarea"
+                placeholder={!chatReady ? 'Add VITE_GEMINI_API_KEY to enable live chat...' : 'Ask TaoChat anything — stake, unstake, swap, research…'}
+                value={input}
+                onChange={(event) => {
+                  setInput(event.target.value);
+                  adjustTextareaHeight();
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    handleSend();
+                  }
+                }}
+                disabled={loading || !chatReady}
+              />
+              <button
+                type="button"
+                className="send-btn"
+                onClick={handleSend}
+                disabled={loading || !input.trim() || !chatReady}
+              >
+                <Send size={16} />
+              </button>
             </div>
           </div>
-        ))}
-
-        {loading && (
-          <div className="thinking-row">
-            <Activity size={16} />
-            Thinking through the route...
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      <div className="chat-input-area">
-        <div className="input-hints">
-          {INPUT_HINTS.map((hint) => (
-            <button key={hint.label} type="button" className="hint" onClick={() => setInput(hint.prompt)}>
-              {hint.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="chat-input-row">
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            className="chat-textarea"
-            placeholder={!chatReady ? 'Add VITE_GEMINI_API_KEY to enable live chat...' : 'Ask TaoChat anything — stake, unstake, swap, research…'}
-            value={input}
-            onChange={(event) => {
-              setInput(event.target.value);
-              adjustTextareaHeight();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                handleSend();
-              }
-            }}
-            disabled={loading || !chatReady}
-          />
-          <button
-            type="button"
-            className="send-btn"
-            onClick={handleSend}
-            disabled={loading || !input.trim() || !chatReady}
-          >
-            <Send size={16} />
-          </button>
-        </div>
-      </div>
         </div>
       </div>
     </div>

@@ -4130,6 +4130,96 @@ body {
   text-align: center;
 }
 
+.history-table-shell {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.history-explorer-grid {
+  display: flex;
+  flex-direction: column;
+  min-width: 850px;
+}
+
+.history-grid-header {
+  display: grid;
+  grid-template-columns: 140px 100px 1fr 140px 90px 140px;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-2);
+  background: rgba(255, 255, 255, 0.015);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.history-grid-row {
+  display: grid;
+  grid-template-columns: 140px 100px 1fr 140px 90px 140px;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  transition: background 0.12s ease;
+}
+
+.history-grid-row:last-child {
+  border-bottom: none;
+}
+
+.history-grid-row:hover {
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.gd-date {
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.gd-type {
+  display: flex;
+  align-items: center;
+}
+
+.gd-details {
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gd-amount {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.gd-status {
+  color: var(--success);
+  font-size: 12px;
+}
+
+.gd-hash {
+  font-size: 12px;
+}
+
+.gd-hash .tx-hash {
+  color: var(--text-3);
+  font-family: monospace;
+}
+
+.gd-hash .tx-hash:hover {
+  color: var(--brand);
+}
+
+
 .empty {
   padding: 4rem 1rem;
   color: var(--text-3);
@@ -5240,6 +5330,7 @@ body {
 }
 
 .msg.user {
+  flex-direction: row;
   justify-content: flex-end;
   margin-left: 0;
 }
@@ -5933,19 +6024,16 @@ body {
 
 .hist-wrap {
   display: grid;
-  grid-template-rows: auto auto minmax(0, auto) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-height: 0;
+  overflow-y: auto;
 }
 
-.history-table-shell {
-  display: grid;
+.history-grid {
   min-width: 0;
+  align-content: start;
 }
 
-.htable {
-  width: 100%;
-  table-layout: fixed;
-}
 
 @media (max-width: 760px) {
   .chat-wrap {

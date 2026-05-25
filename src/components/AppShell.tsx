@@ -9,6 +9,7 @@ interface AppShellProps {
   statusBanner: ReactNode;
   formatShortValue: (value: string, start?: number, end?: number) => string;
   onDisconnectWallet: () => void;
+  onConnectWallet: () => void;
   onLoadHistory: () => void;
   onReturnLanding: () => void;
   onSetAppView: (view: AppView) => void;
@@ -21,6 +22,7 @@ export default function AppShell({
   statusBanner,
   formatShortValue,
   onDisconnectWallet,
+  onConnectWallet,
   onLoadHistory,
   onReturnLanding,
   onSetAppView,
@@ -107,7 +109,7 @@ export default function AppShell({
           ))}
         </nav>
 
-        {account && (
+        {account ? (
           <div className="app-sidebar__footer">
             <div className="wpill">
               <div className="wdot" />
@@ -116,6 +118,17 @@ export default function AppShell({
             </div>
             <button type="button" className="sidebar-disconnect" onClick={onDisconnectWallet}>
               Disconnect
+            </button>
+          </div>
+        ) : (
+          <div className="app-sidebar__footer">
+            <button
+              type="button"
+              className="tao-btn tao-btn--primary sidebar-connect"
+              onClick={onConnectWallet}
+              style={{ width: '100%', whiteSpace: 'nowrap' }}
+            >
+              Connect wallet
             </button>
           </div>
         )}

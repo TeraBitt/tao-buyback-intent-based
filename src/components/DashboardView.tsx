@@ -57,7 +57,7 @@ interface DashboardViewProps {
   unstakeAmount: string;
   unstakeNetuid: number;
   unstakeTaoEstimate: string | null;
-  walletPill: ReactNode;
+  onConnectWallet: () => void;
 }
 
 export default function DashboardView({
@@ -111,10 +111,35 @@ export default function DashboardView({
   unstakeAmount,
   unstakeNetuid,
   unstakeTaoEstimate,
-  walletPill,
+  onConnectWallet,
 }: DashboardViewProps) {
     if (isWalletHydrating) {
       return <>{loadingState}</>;
+    }
+
+    if (!account) {
+      return (
+        <div className="swap-wrap">
+          <div className="swap-head">
+            <h2>Swap &amp; Stake</h2>
+          </div>
+          <div className="empty">
+            <div className="empty-ic">⇄</div>
+            <div className="empty-t">Connect your wallet</div>
+            <div className="empty-d">
+              Please connect your wallet to stake, unstake, and move your positions on the Bittensor EVM testnet.
+            </div>
+            <button
+              type="button"
+              className="tao-btn tao-btn--primary"
+              onClick={onConnectWallet}
+              style={{ marginTop: '20px', padding: '10px 24px' }}
+            >
+              Connect wallet
+            </button>
+          </div>
+        </div>
+      );
     }
 
     const stakeAmountValue = Number.parseFloat(stakeAmount || '0');
@@ -197,7 +222,7 @@ export default function DashboardView({
       <div className="swap-wrap">
         <div className="swap-head">
           <h2>Swap &amp; Stake</h2>
-          {walletPill}
+
         </div>
 
         <div className="swap-mode-row">

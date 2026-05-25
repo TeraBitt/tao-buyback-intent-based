@@ -1101,23 +1101,7 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
-  const renderInlineWalletPill = () =>
-    account ? (
-      <div className="wallet-inline-actions">
-        <div className="wpill">
-          <div className="wdot" />
-          <div className="waddr">{formatShortValue(account, 6, 4)}</div>
-          <div className="wnet">Testnet</div>
-        </div>
-        <button type="button" className="tao-btn tao-btn--ghost tao-btn--small" onClick={disconnectWallet}>
-          Disconnect
-        </button>
-      </div>
-    ) : (
-      <button type="button" className="tao-btn tao-btn--primary tao-btn--small" onClick={() => setShowWalletModal(true)}>
-        Connect wallet
-      </button>
-    );
+
 
   const renderLoadingState = () => (
     <div className="loading-shell">
@@ -1145,6 +1129,7 @@ function App() {
       onExportHistory={handleExportHistory}
       onSetHistoryFilter={setHistoryFilter}
       onSetHistoryPage={setHistoryPage}
+      onConnectWallet={() => setShowWalletModal(true)}
     />
   );
 
@@ -1164,6 +1149,7 @@ function App() {
           appView={appView}
           formatShortValue={formatShortValue}
           onDisconnectWallet={disconnectWallet}
+          onConnectWallet={() => setShowWalletModal(true)}
           onLoadHistory={() => fetchOnchainHistory(account || undefined)}
           onReturnLanding={() => setSurface('landing')}
           onSetAppView={setAppView}
@@ -1221,7 +1207,7 @@ function App() {
               unstakeAmount={unstakeAmount}
               unstakeNetuid={unstakeNetuid}
               unstakeTaoEstimate={unstakeTaoEstimate}
-              walletPill={renderInlineWalletPill()}
+              onConnectWallet={() => setShowWalletModal(true)}
             />
           )}
           {appView === 'history' && renderHistoryView()}

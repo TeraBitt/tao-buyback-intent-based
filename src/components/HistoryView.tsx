@@ -17,6 +17,7 @@ interface HistoryViewProps {
   onExportHistory: () => void;
   onSetHistoryFilter: (filter: HistoryFilter) => void;
   onSetHistoryPage: (page: number) => void;
+  onConnectWallet: () => void;
 }
 
 const HISTORY_FILTERS: { id: HistoryFilter; label: string }[] = [
@@ -43,7 +44,34 @@ export default function HistoryView({
   onExportHistory,
   onSetHistoryFilter,
   onSetHistoryPage,
+  onConnectWallet,
 }: HistoryViewProps) {
+  // If not connected, show the connect wallet screen
+  if (!account) {
+    return (
+      <div className="hist-wrap">
+        <div className="hist-top">
+          <h2>History</h2>
+        </div>
+        <div className="empty">
+          <div className="empty-ic">☰</div>
+          <div className="empty-t">Connect your wallet</div>
+          <div className="empty-d">
+            Please connect your wallet to view your Bittensor EVM testnet staking history and transaction activity.
+          </div>
+          <button
+            type="button"
+            className="tao-btn tao-btn--primary"
+            onClick={onConnectWallet}
+            style={{ marginTop: '20px', padding: '10px 24px' }}
+          >
+            Connect wallet
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="hist-wrap">
       <div className="hist-top">
@@ -87,43 +115,32 @@ export default function HistoryView({
       ) : filteredHistory.length > 0 ? (
         <>
           <div className="history-table-shell">
-            <table className="htable">
-              <colgroup>
-                <col className="history-col-date" />
-                <col className="history-col-type" />
-                <col className="history-col-details" />
-                <col className="history-col-amount" />
-                <col className="history-col-status" />
-                <col className="history-col-hash" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Type</th>
-                  <th>Details</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Tx Hash</th>
-                </tr>
-              </thead>
-              <tbody>
+            <div className="history-explorer-grid">
+              <div className="history-grid-header">
+                <span className="gh-date">DATE</span>
+                <span className="gh-type">TYPE</span>
+                <span className="gh-details">DETAILS</span>
+                <span className="gh-amount">AMOUNT</span>
+                <span className="gh-status">STATUS</span>
+                <span className="gh-hash">TX HASH</span>
+              </div>
+
+              <div className="history-grid-body">
                 {paginatedHistory.map((event) => (
-                  <tr key={`${event.txHash}-${event.timestamp}`}>
-                    <td data-label="Date" style={{ color: 'var(--text-2)' }}>
-                      {formatHistoryTime(event.timestamp)}
-                    </td>
-                    <td data-label="Type">
+                  <div key={`${event.txHash}-${event.timestamp}`} className="history-grid-row">
+                    <div className="gd-date">{formatHistoryTime(event.timestamp)}</div>
+                    <div className="gd-type">
                       <span className={`tt ${event.type === 'stake' ? 'tt-s' : event.type === 'unstake' ? 'tt-u' : 'tt-x'}`}>
                         {event.type === 'stake' ? '↑ Stake' : event.type === 'unstake' ? '↓ Unstake' : '⇄ Move'}
                       </span>
-                    </td>
-                    <td data-label="Details">{event.detail}</td>
-                    <td data-label="Amount" className={event.type === 'unstake' ? 'amt-n' : 'amt-p'}>
+                    </div>
+                    <div className="gd-details">{event.detail}</div>
+                    <div className={`gd-amount ${event.type === 'unstake' ? 'amt-n' : 'amt-p'}`}>
                       {event.type === 'unstake' ? '−' : '+'}
                       {event.amount}
-                    </td>
-                    <td data-label="Status" className="tx-ok">✓ Done</td>
-                    <td data-label="Tx Hash">
+                    </div>
+                    <div className="gd-status">✓ Done</div>
+                    <div className="gd-hash">
                       <a
                         href={`${explorerBaseUrl}${event.txHash}`}
                         target="_blank"
@@ -132,11 +149,11 @@ export default function HistoryView({
                       >
                         {formatShortValue(event.txHash, 10, 6)}
                       </a>
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            </div>
           </div>
 
           <div className="history-pagination">
@@ -171,9 +188,7 @@ export default function HistoryView({
           <div className="empty-ic">☰</div>
           <div className="empty-t">No matching activity yet</div>
           <div className="empty-d">
-            {account
-              ? 'Confirmed stake, unstake, and move intents will appear here once they exist on-chain.'
-              : 'Connect a wallet to load confirmed stake, unstake, and move intents from the contract.'}
+            Confirmed stake, unstake, and move intents will appear here once they exist on-chain.
           </div>
         </div>
       )}
