@@ -16,6 +16,7 @@ interface ChatPortalProps {
     targetNetuid: number,
     amount: string,
   ) => Promise<{ targetAlpha: string; intermediateTao: string } | null>;
+  simulateUnstakeTao: (netuid: number, amount: string) => Promise<string | null>;
   executeStake: (amount: string, netuid: number) => Promise<boolean>;
   executeUnstake: (netuid: number, amount?: string) => Promise<boolean>;
   executeSwap: (sourceNetuid: number, targetNetuid: number, amount: string) => Promise<boolean>;
@@ -87,16 +88,10 @@ interface ChatMessage {
     netuid: number;
     targetNetuid?: number;
     estimatedAlpha?: string;
+    estimatedTao?: string;
     intermediateTao?: string;
   };
 }
-
-const QUICK_PROMPTS = [
-  'Stake 100 TAO on the best subnet',
-  'Move 0.03 ALPHA from Subnet 310 to Subnet 395',
-  'Unstake my Subnet 19 position',
-  'What is Subnet 27?',
-];
 
 const INPUT_HINTS = [
   { label: '↑ Stake', prompt: 'Stake 50 TAO on Subnet 19' },
@@ -114,6 +109,7 @@ export default function ChatPortal({
   currentNetuid,
   simulateStakeAlpha,
   simulateSwapAlpha,
+  simulateUnstakeTao,
   executeStake,
   executeUnstake,
   executeSwap,
@@ -167,6 +163,8 @@ export default function ChatPortal({
   };
 
   const chatReady = Boolean(chatSession);
+  const hasSubmittedPrompt = messages.some((message) => message.role === 'user' && !message.text.startsWith('[System]'));
+  const isIntroState = !hasSubmittedPrompt;
 
   const dismissAction = (messageIndex: number) => {
     setMessages((prev) =>
@@ -238,6 +236,7 @@ export default function ChatPortal({
         } else if (call.name === 'initiate_unstake' && chatSession) {
           const { netuid, amount } = call.args as { netuid: number; amount?: string };
           const alphaOnNetuid = Number.parseFloat(allAlphaBalances[netuid] || '0');
+          const amountToQuote = amount || allAlphaBalances[netuid] || '';
 
           if (alphaOnNetuid <= 0) {
             const functionResponse = {
@@ -249,12 +248,15 @@ export default function ChatPortal({
             const nextResult = await chatSession.sendMessage([{ functionResponse }]);
             await processResponse(nextResult);
           } else {
+            const estimatedTao = amountToQuote ? await simulateUnstakeTao(netuid, amountToQuote) : null;
             setMessages((prev) => [
               ...prev,
               {
                 role: 'model',
-                text: `I prepared an unstake intent for ${amount ? `${amount} Alpha` : 'the full Alpha position'} on Netuid ${netuid}.`,
-                action: { type: 'unstake', netuid, amount },
+                text: estimatedTao
+                  ? `I prepared an unstake intent for ${amount ? `${amount} Alpha` : 'the full Alpha position'} on Netuid ${netuid}. Simulation estimates about ${formatTokenAmount(estimatedTao)} TAO back to your wallet.`
+                  : `I prepared an unstake intent for ${amount ? `${amount} Alpha` : 'the full Alpha position'} on Netuid ${netuid}.`,
+                action: { type: 'unstake', netuid, amount, estimatedTao: estimatedTao ?? undefined },
               },
             ]);
           }
@@ -362,7 +364,7 @@ export default function ChatPortal({
   };
 
   return (
-    <div className="chat-wrap">
+    <div className={`chat-wrap ${isIntroState ? 'chat-wrap--intro' : ''}`}>
       <div className="chat-head">
         <div className="chat-head-l">
           <div className="ch-title">TaoChat</div>
@@ -389,14 +391,16 @@ export default function ChatPortal({
         )}
       </div>
 
-      {!account && (
-        <div className="chat-inline-banner">
-          <ShieldAlert size={16} />
-          <span>Live today: Bittensor EVM testnet staking, unstaking, and subnet rotation. External-chain deposits are coming soon.</span>
-        </div>
-      )}
+      <div className={`chat-body ${isIntroState ? 'chat-body--intro' : 'chat-body--conversation'}`}>
+        {!account && (
+          <div className="chat-inline-banner">
+            <ShieldAlert size={16} />
+            <span>Live today: Bittensor EVM testnet staking, unstaking, and subnet rotation. External-chain deposits are coming soon.</span>
+          </div>
+        )}
 
-      <div className="chat-msgs">
+        <div className={isIntroState ? 'chat-intro-grid' : 'chat-conversation-grid'}>
+          <div className="chat-msgs">
         {messages.map((message, index) => (
           <div key={`${message.role}-${index}`} className={`msg ${message.role === 'user' ? 'user' : ''}`}>
             <div className={`av ${message.role === 'user' ? 'av-u' : 'av-b'}`}>{message.role === 'user' ? 'U' : 'T'}</div>
@@ -405,22 +409,6 @@ export default function ChatPortal({
               <div className="chat-markdown">
                 <ReactMarkdown>{message.text}</ReactMarkdown>
               </div>
-
-              {index === 0 && message.role === 'model' && (
-                <div className="suggestions">
-                  {QUICK_PROMPTS.map((prompt) => (
-                    <button key={prompt} type="button" className="sug" onClick={() => setInput(prompt)}>
-                      {prompt === 'Stake 100 TAO on the best subnet'
-                        ? 'Stake TAO'
-                        : prompt === 'Move half my Subnet 310 position to Subnet 19'
-                          ? 'Move subnet'
-                          : prompt === 'Unstake my Subnet 19 position'
-                            ? 'Unstake'
-                            : 'Research subnet'}
-                    </button>
-                  ))}
-                </div>
-              )}
 
               {message.action && (
                 <div className="tcard">
@@ -476,6 +464,14 @@ export default function ChatPortal({
                         <div className="trow">
                           <span className="trow-k">From</span>
                           <span className="trow-v trow-vo">Netuid {message.action.netuid}</span>
+                        </div>
+                        <div className="trow">
+                          <span className="trow-k">Estimated receive</span>
+                          <span className="trow-v trow-vg">
+                            {message.action.estimatedTao
+                              ? `≈${formatTokenAmount(message.action.estimatedTao)} TAO`
+                              : 'Simulation unavailable'}
+                          </span>
                         </div>
                       </>
                     )}
@@ -585,6 +581,8 @@ export default function ChatPortal({
           >
             <Send size={16} />
           </button>
+        </div>
+      </div>
         </div>
       </div>
     </div>
