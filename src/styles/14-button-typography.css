@@ -1,0 +1,24 @@
+/* Keep app buttons readable without the heavy bold treatment. */
+.dashboard-shell button,
+.wallet-modal-card button {
+  font-weight: 500;
+}
+
+.tao-btn,
+.swap-action-btn,
+.btn-confirm,
+.btn-cancel,
+.fp,
+.hint,
+.sug,
+.send-btn,
+.wallet-modal-option__action,
+.sidebar-disconnect,
+.history-pagination__button,
+.subnet-pagination__controls button {
+  font-weight: 500;
+}
+
+.app-sidebar__nav-copy span {
+  font-weight: 500;
+}

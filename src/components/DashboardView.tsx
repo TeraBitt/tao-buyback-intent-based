@@ -1,10 +1,16 @@
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
-import { Search, X } from 'lucide-react';
+import { ArrowDown, ArrowUpDown, Search, X } from 'lucide-react';
 import { DISPLAY_SUBNETS } from '../data/subnets';
 import type { StakingAction, StakingPositionSummary, StatusState, SubnetPresentation, SwapAlphaSimulation } from '../types';
 
 const APY_LABEL = 'Est. APY';
 const TESTNET_SUBNET_PAGE_SIZE = 8;
+
+interface TransactionDetailItem {
+  label: string;
+  value: string;
+  tone?: 'success';
+}
 
 interface DashboardViewProps {
   account: string;
@@ -142,27 +148,21 @@ export default function DashboardView({
       );
     }
 
-    const stakeAmountValue = Number.parseFloat(stakeAmount || '0');
-    const swapAmountValue = Number.parseFloat(swapAmount || allAlphaBalances[swapSourceNetuid] || '0');
-    const swapTargetAmountValue = Number.parseFloat(swapAlphaEstimate?.targetAlpha ?? String(swapAmountValue));
     const unstakeAmountToQuote = unstakeAmount || allAlphaBalances[unstakeNetuid] || '';
     const unstakeReceiveAmount = unstakeTaoEstimate ?? '';
-    const unstakeReceiveValue = Number.parseFloat(unstakeReceiveAmount || '0');
-    const unstakeReceiveAfterGas = Math.max(unstakeReceiveValue - 0.0004, 0);
-    const selectedApy = Number.parseFloat(
-      (stakingAction === 'stake'
+    const selectedApyLabel =
+      stakingAction === 'stake'
         ? selectedStakeSubnet.apy
         : stakingAction === 'swap'
           ? selectedSwapTargetSubnet.apy
-          : selectedUnstakeSubnet.apy
-      ).replace('%', ''),
+          : selectedUnstakeSubnet.apy;
+    const activeSwapSourceMap = new Map<string, string>(
+      activePositions.length > 0 ? activePositions : [[String(swapSourceNetuid), allAlphaBalances[swapSourceNetuid] || '0']],
     );
-    const simulationBase =
-      stakingAction === 'stake' ? stakeAmountValue : stakingAction === 'swap' ? swapTargetAmountValue : unstakeReceiveValue;
-    const thirtyDayReturn = (simulationBase * selectedApy) / 12 / 100;
-    const ninetyDayReturn = (simulationBase * selectedApy) / 4 / 100;
-    const yearlyReturn = (simulationBase * selectedApy) / 100;
-    const activeSwapSources = activePositions.length > 0 ? activePositions : [['310', allAlphaBalances[310] || '0']];
+    if (!activeSwapSourceMap.has(String(swapSourceNetuid))) {
+      activeSwapSourceMap.set(String(swapSourceNetuid), allAlphaBalances[swapSourceNetuid] || '0');
+    }
+    const activeSwapSources = Array.from(activeSwapSourceMap.entries());
     const activeUnstakeSources = activePositions.length > 0 ? activePositions : [[String(unstakeNetuid), allAlphaBalances[unstakeNetuid] || '0']];
     const scannedNetuids = [...availableNetuids]
       .filter((targetNetuid) => targetNetuid > 0)
@@ -217,6 +217,61 @@ export default function DashboardView({
           ? 'Current positions'
           : 'Testnet destination';
     const selectedSwapSourceBalance = formatTokenAmount(allAlphaBalances[swapSourceNetuid] || '0');
+    const commonDetailItems: TransactionDetailItem[] = [
+      { label: 'Gas', value: '~0.0004 TAO' },
+      { label: 'Arrival', value: '~12 seconds', tone: 'success' },
+    ];
+    const transactionDetailItems: TransactionDetailItem[] = [
+      ...(stakingAction === 'stake'
+        ? [
+            { label: 'Destination', value: getUiSubnetLabel(netuid) },
+            {
+              label: 'Receive',
+              value: isStakeEstimateLoading
+                ? 'Simulating...'
+                : stakeAlphaEstimate
+                  ? `≈${formatTokenAmount(stakeAlphaEstimate, 6)} ALPHA`
+                  : 'Enter amount',
+              tone: 'success' as const,
+            },
+          ]
+        : stakingAction === 'swap'
+          ? [
+              { label: 'Route', value: `${getUiSubnetLabel(swapSourceNetuid)} / ${getUiSubnetLabel(swapTargetNetuid)}` },
+              {
+                label: 'Receive',
+                value: isSwapEstimateLoading
+                  ? 'Simulating...'
+                  : swapAlphaEstimate
+                    ? `≈${formatTokenAmount(swapAlphaEstimate.targetAlpha, 6)} ALPHA`
+                    : 'Pick route',
+                tone: 'success' as const,
+              },
+            ]
+          : [
+              { label: 'From', value: getUiSubnetLabel(unstakeNetuid) },
+              {
+                label: 'TAO receive',
+                value: isUnstakeEstimateLoading
+                  ? 'Simulating...'
+                  : unstakeTaoEstimate
+                    ? `≈${formatTokenAmount(unstakeTaoEstimate, 6)} TAO`
+                    : unstakeAmountToQuote
+                      ? 'Quote unavailable'
+                      : 'Enter amount',
+                tone: 'success' as const,
+              },
+            ]),
+      ...commonDetailItems,
+      { label: stakingAction === 'unstake' ? 'Source APY' : APY_LABEL, value: selectedApyLabel, tone: 'success' as const },
+    ];
+    const handleMidRouteToggle = () => {
+      if (stakingAction !== 'swap') return;
+
+      setSwapSourceNetuid(swapTargetNetuid);
+      setSwapTargetNetuid(swapSourceNetuid);
+      setSwapAmount('');
+    };
 
     return (
       <div className="swap-wrap">
@@ -308,7 +363,7 @@ export default function DashboardView({
 
 	                            return (
 	                              <option key={id} value={sourceNetuid}>
-	                                {sourceMeta.code} — {sourceMeta.name} · {formatTokenAmount(bal)}α
+	                                {sourceMeta.code} - {sourceMeta.name} · {formatTokenAmount(bal)}α
 	                              </option>
 	                            );
 	                          })}
@@ -326,7 +381,7 @@ export default function DashboardView({
 
 	                            return (
 	                              <option key={id} value={sourceNetuid}>
-	                                {sourceMeta.code} — {sourceMeta.name} · {formatTokenAmount(bal)}α
+	                                {sourceMeta.code} - {sourceMeta.name} · {formatTokenAmount(bal)}α
 	                              </option>
 	                            );
 	                          })}
@@ -361,8 +416,14 @@ export default function DashboardView({
                 </div>
 
                 <div className="swap-mid-row">
-                  <button type="button" className="swaptog">
-                    ⇅
+                  <button
+                    type="button"
+                    className={`swaptog ${stakingAction !== 'swap' ? 'swaptog--static' : ''}`}
+                    onClick={handleMidRouteToggle}
+                    aria-label={stakingAction === 'swap' ? 'Flip source and destination subnets' : 'Route direction'}
+                    disabled={stakingAction !== 'swap'}
+                  >
+                    {stakingAction === 'swap' ? <ArrowUpDown size={15} /> : <ArrowDown size={15} />}
                   </button>
                 </div>
 
@@ -397,7 +458,7 @@ export default function DashboardView({
 
 	                            return (
 	                              <option key={displayNetuid} value={displayNetuid}>
-	                                {displayMeta.code} — {displayMeta.name}
+	                                {displayMeta.code} - {displayMeta.name}
 	                              </option>
 	                            );
 	                          })}
@@ -414,7 +475,7 @@ export default function DashboardView({
 
 	                            return (
 	                              <option key={displayNetuid} value={displayNetuid}>
-	                                {displayMeta.code} — {displayMeta.name}
+	                                {displayMeta.code} - {displayMeta.name}
 	                              </option>
 	                            );
 	                          })}
@@ -456,189 +517,61 @@ export default function DashboardView({
                   </div>
                 </div>
 
-                <div style={{ margin: '1rem 0 .5rem' }}>
+                <div className="swap-detail-list">
+                  {transactionDetailItems.map((item) => (
+                    <div className="det-row" key={`${item.label}-${item.value}`}>
+                      <span>{item.label}</span>
+                      <span className={item.tone === 'success' ? 'det-value-success' : undefined}>{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="swap-submit-dock">
+
                   {stakingAction === 'stake' && (
-                    <>
-                      <div className="det-row">
-                        <span>Testnet destination</span>
-                        <span>{getUiSubnetLabel(netuid)}</span>
-                      </div>
-                      <div className="det-row">
-                        <span>{APY_LABEL}</span>
-                        <span style={{ color: 'var(--success)' }}>{selectedStakeSubnet.apy}</span>
-                      </div>
-                      <div className="det-row">
-                        <span>Simulated ALPHA</span>
-                        <span style={{ color: 'var(--success)' }}>
-                          {isStakeEstimateLoading
-                            ? 'Simulating...'
-                            : stakeAlphaEstimate
-                              ? `≈${formatTokenAmount(stakeAlphaEstimate, 6)} ALPHA`
-                              : 'Enter amount'}
-                        </span>
-                      </div>
-                    </>
+                    <button
+                      type="button"
+                      className="swap-action-btn"
+                      onClick={handleBuyAlpha}
+                      disabled={!account || !stakeAmount || status.type === 'loading'}
+                    >
+                      Stake on {selectedStakeSubnet.code} →
+                    </button>
                   )}
+
                   {stakingAction === 'swap' && (
-                    <>
-                      <div className="det-row">
-                        <span>Source route</span>
-                        <span>{getUiSubnetLabel(swapSourceNetuid)}</span>
-                      </div>
-                      <div className="det-row">
-                        <span>Destination</span>
-                        <span>{getUiSubnetLabel(swapTargetNetuid)}</span>
-                      </div>
-                      <div className="det-row">
-                        <span>Simulated receive</span>
-                        <span style={{ color: 'var(--success)' }}>
-                          {isSwapEstimateLoading
-                            ? 'Simulating...'
-                            : swapAlphaEstimate
-                              ? `≈${formatTokenAmount(swapAlphaEstimate.targetAlpha, 6)} ALPHA`
-                              : 'Pick source and destination'}
-                        </span>
-                      </div>
-                      {swapAlphaEstimate && (
-                        <div className="det-row">
-                          <span>Route value</span>
-                          <span>via ≈{formatTokenAmount(swapAlphaEstimate.intermediateTao, 6)} TAO</span>
-                        </div>
-                      )}
-                    </>
+                    <button
+                      type="button"
+                      className="swap-action-btn"
+                      onClick={handleSwap}
+                      disabled={
+                        !account ||
+                        status.type === 'loading' ||
+                        swapSourceNetuid === swapTargetNetuid ||
+                        (swapAmount === '' &&
+                          (!allAlphaBalances[swapSourceNetuid] || Number.parseFloat(allAlphaBalances[swapSourceNetuid]) === 0))
+                      }
+                    >
+                      Move {formatTokenAmount(swapAmount || allAlphaBalances[swapSourceNetuid] || '0')} ALPHA from{' '}
+                      {selectedSwapSourceSubnet.code} to {selectedSwapTargetSubnet.code} →
+                    </button>
                   )}
+
                   {stakingAction === 'unstake' && (
-                    <>
-                      <div className="det-row">
-                        <span>From subnet</span>
-                        <span>{getUiSubnetLabel(unstakeNetuid)}</span>
-                      </div>
-                      <div className="det-row">
-                        <span>Simulated TAO receive</span>
-                        <span style={{ color: 'var(--success)' }}>
-                          {isUnstakeEstimateLoading
-                            ? 'Simulating...'
-                            : unstakeTaoEstimate
-                              ? `≈${formatTokenAmount(unstakeTaoEstimate, 6)} TAO`
-                              : unstakeAmountToQuote
-                                ? 'Quote unavailable'
-                                : 'Enter amount'}
-                        </span>
-                      </div>
-                      <div className="det-row">
-                        <span>Unbonding</span>
-                        <span>~12 seconds</span>
-                      </div>
-                    </>
-                  )}
-                  <div className="det-row">
-                    <span>Network gas</span>
-                    <span>~0.0004 TAO</span>
-                  </div>
-                  <div className="det-row">
-                    <span>Estimated arrival</span>
-                    <span style={{ color: 'var(--success)' }}>~12 seconds</span>
-                  </div>
-                </div>
-
-                <div className="swap-sim">
-                  <div className="swap-sim-t">
-                    {stakingAction === 'unstake'
-                      ? 'Simulated unlocked TAO'
-                      : `Projected returns at ${selectedApy.toFixed(1)}% ${APY_LABEL}`}
-                  </div>
-                  {stakingAction === 'unstake' ? (
-                    <div className="swap-sim-g swap-sim-g--unstake">
-                      <div className="ssim">
-                        <div className="ssim-p">Receive</div>
-                        <div className="ssim-v">
-                          {isUnstakeEstimateLoading
-                            ? '...'
-                            : unstakeTaoEstimate
-                              ? `≈${formatTokenAmount(unstakeTaoEstimate, 6)}`
-                              : unstakeAmountToQuote
-                                ? 'Unavailable'
-                                : '0'}
-                        </div>
-                      </div>
-                      <div className="ssim">
-                        <div className="ssim-p">Network gas</div>
-                        <div className="ssim-v">~0.0004</div>
-                      </div>
-                      <div className="ssim">
-                        <div className="ssim-p">Wallet gets</div>
-                        <div className="ssim-v">
-                          {isUnstakeEstimateLoading
-                            ? '...'
-                            : unstakeTaoEstimate
-                              ? `≈${formatTokenAmount(String(unstakeReceiveAfterGas), 6)}`
-                              : unstakeAmountToQuote
-                                ? 'Unavailable'
-                                : '0'}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="swap-sim-g">
-                      <div className="ssim">
-                        <div className="ssim-p">30 days</div>
-                        <div className="ssim-v">+{formatTokenAmount(String(thirtyDayReturn))}</div>
-                      </div>
-                      <div className="ssim">
-                        <div className="ssim-p">90 days</div>
-                        <div className="ssim-v">+{formatTokenAmount(String(ninetyDayReturn))}</div>
-                      </div>
-                      <div className="ssim">
-                        <div className="ssim-p">1 year</div>
-                        <div className="ssim-v">+{formatTokenAmount(String(yearlyReturn))}</div>
-                      </div>
-                    </div>
+                    <button
+                      type="button"
+                      className="swap-action-btn"
+                      onClick={handleUnstake}
+                      disabled={
+                        !account ||
+                        status.type === 'loading' ||
+                        !(allAlphaBalances[unstakeNetuid] && Number.parseFloat(allAlphaBalances[unstakeNetuid]) > 0)
+                      }
+                    >
+                      Unstake from {selectedUnstakeSubnet.code} →
+                    </button>
                   )}
                 </div>
-
-                {stakingAction === 'stake' && (
-                  <button
-                    type="button"
-                    className="swap-action-btn"
-                    onClick={handleBuyAlpha}
-                    disabled={!account || !stakeAmount || status.type === 'loading'}
-                  >
-                    Stake on {selectedStakeSubnet.code} →
-                  </button>
-                )}
-
-                {stakingAction === 'swap' && (
-                  <button
-                    type="button"
-                    className="swap-action-btn"
-                    onClick={handleSwap}
-                    disabled={
-                      !account ||
-                      status.type === 'loading' ||
-                      swapSourceNetuid === swapTargetNetuid ||
-                      (swapAmount === '' &&
-                        (!allAlphaBalances[swapSourceNetuid] || Number.parseFloat(allAlphaBalances[swapSourceNetuid]) === 0))
-                    }
-                  >
-                    Move {formatTokenAmount(swapAmount || allAlphaBalances[swapSourceNetuid] || '0')} ALPHA from{' '}
-                    {selectedSwapSourceSubnet.code} to {selectedSwapTargetSubnet.code} →
-                  </button>
-                )}
-
-                {stakingAction === 'unstake' && (
-                  <button
-                    type="button"
-                    className="swap-action-btn"
-                    onClick={handleUnstake}
-                    disabled={
-                      !account ||
-                      status.type === 'loading' ||
-                      !(allAlphaBalances[unstakeNetuid] && Number.parseFloat(allAlphaBalances[unstakeNetuid]) > 0)
-                    }
-                  >
-                    Unstake from {selectedUnstakeSubnet.code} →
-                  </button>
-                )}
               </div>
             </div>
           </div>

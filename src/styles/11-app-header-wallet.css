@@ -1,0 +1,105 @@
+/* Top-right wallet control inside the app chrome. */
+.app-main__wallet {
+  position: absolute;
+  top: 15px;
+  right: 28px;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.app-wallet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(17, 21, 27, 0.92);
+  color: #f1ede9;
+  font-size: 12.5px;
+  font-weight: 500;
+  box-shadow:
+    0 14px 36px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(14px);
+}
+
+.app-wallet-connect {
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 18px;
+  border-radius: 10px;
+  background: var(--brand);
+  color: #050505;
+  font-size: 13px;
+  box-shadow:
+    0 14px 36px rgba(246, 133, 27, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+.app-wallet-connect:hover:not(:disabled) {
+  background: var(--brand-soft);
+  color: #050505;
+}
+
+.app-wallet-connect svg {
+  color: #050505;
+  stroke: #050505;
+}
+
+.app-wallet-chip {
+  padding: 0 6px 0 12px;
+}
+
+.app-wallet-chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success);
+  box-shadow: 0 0 0 4px rgba(39, 245, 174, 0.12);
+}
+
+.app-wallet-chip button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #aab4c1;
+}
+
+.app-wallet-chip button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f1ede9;
+}
+
+@media (max-width: 920px) {
+  .app-main__wallet {
+    top: 12px;
+    right: 58px;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-main__wallet {
+    position: static;
+    justify-content: flex-end;
+    padding: 10px 12px 0;
+    background: #08090b;
+  }
+
+  .app-wallet-chip {
+    min-height: 34px;
+    font-size: 12px;
+  }
+
+  .app-wallet-connect {
+    min-height: 36px;
+    padding: 0 14px;
+    font-size: 12.5px;
+  }
+}

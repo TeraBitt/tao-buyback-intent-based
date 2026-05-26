@@ -1,0 +1,94 @@
+/* Swap-specific action dock and route toggle behavior. */
+.swap-submit-dock {
+  position: sticky;
+  bottom: 12px;
+  z-index: 3;
+  margin-top: 1rem;
+}
+
+.swap-submit-dock .swap-sim {
+  margin-top: 0;
+  border-color: rgba(39, 245, 174, 0.24);
+  background:
+    linear-gradient(135deg, rgba(39, 245, 174, 0.08), rgba(246, 133, 27, 0.06)),
+    rgba(9, 18, 18, 0.82);
+}
+
+.swap-submit-dock .swap-action-btn {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+  padding: 12px 14px;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+}
+
+.swap-detail-list {
+  margin: 1rem 0 0.5rem;
+}
+
+.swap-detail-list .det-row span:last-child {
+  max-width: 68%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swap-detail-list .det-value-success {
+  color: var(--success);
+}
+
+.swap-apy-summary {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 1rem;
+}
+
+.swap-apy-summary strong {
+  color: var(--success);
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.swaptog {
+  display: inline-grid;
+  place-items: center;
+  font-weight: 500;
+  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.swaptog:hover:not(:disabled) {
+  transform: rotate(180deg);
+}
+
+.swaptog--static,
+.swaptog--static:disabled {
+  cursor: default;
+  opacity: 1;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: #f4f1ed;
+  color: #08090b;
+}
+
+@media (max-width: 640px) {
+  .swap-submit-dock {
+    position: static;
+  }
+
+  .swap-submit-dock .swap-action-btn {
+    min-height: 48px;
+  }
+
+  .swap-detail-list .det-row span:last-child {
+    max-width: 100%;
+    text-align: left;
+    white-space: normal;
+  }
+}

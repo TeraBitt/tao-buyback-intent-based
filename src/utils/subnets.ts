@@ -48,7 +48,7 @@ export const getSubnetPresentation = (targetNetuid: number): SubnetPresentation 
 
 export const getSubnetLabel = (targetNetuid: number) => {
   const subnetMeta = getSubnetPresentation(targetNetuid);
-  return `${subnetMeta.code} — ${subnetMeta.name}`;
+  return `${subnetMeta.code} - ${subnetMeta.name}`;
 };
 
 export const getHotkeyForNetuid = (targetNetuid: number): string => {

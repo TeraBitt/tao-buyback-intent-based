@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import type { ChatSession, FunctionDeclaration, GenerateContentResult } from '@google/generative-ai';
 import { Activity, Send, ShieldAlert } from 'lucide-react';
+import TERABITT_LOGO from '../assets/terabitt_logo.png';
 
 interface ChatPortalProps {
   account: string;
@@ -23,6 +24,7 @@ interface ChatPortalProps {
   status: { type: 'idle' | 'loading' | 'success' | 'error'; msg: string };
   openWalletSelector: () => void;
   disconnectWallet: () => void;
+  onReturnLanding: () => void;
 }
 
 const stakeTool: FunctionDeclaration = {
@@ -114,6 +116,7 @@ export default function ChatPortal({
   executeUnstake,
   executeSwap,
   status,
+  onReturnLanding,
 }: ChatPortalProps) {
   const initialMessage = import.meta.env.VITE_GEMINI_API_KEY
     ? "Hey! I'm TaoChat — I can help you stake, unstake, swap, and research Bittensor subnets in plain English."
@@ -360,8 +363,11 @@ export default function ChatPortal({
     <div className={`chat-wrap ${isIntroState ? 'chat-wrap--intro' : ''}`}>
       <div className="chat-head">
         <div className="chat-head-l">
-          <div className="ch-title">TaoChat</div>
-          <div className="ch-sub">{account ? 'Bittensor EVM testnet connected' : 'Bittensor EVM testnet · connect wallet in sidebar'}</div>
+          <button type="button" className="ch-title chat-title-brand" onClick={onReturnLanding} aria-label="Back to landing page">
+            <img src={TERABITT_LOGO} alt="" className="ch-title__logo" />
+            <span>TeraBitt</span>
+          </button>
+          <div className="ch-sub">{account ? 'Bittensor EVM testnet connected' : 'Bittensor EVM testnet · Connect wallet and proceed'}</div>
         </div>
       </div>
 
@@ -375,7 +381,9 @@ export default function ChatPortal({
           <div className="chat-msgs">
             {messages.map((message, index) => (
               <div key={`${message.role}-${index}`} className={`msg ${message.role === 'user' ? 'user' : ''}`}>
-                <div className={`av ${message.role === 'user' ? 'av-u' : 'av-b'}`}>{message.role === 'user' ? 'U' : 'T'}</div>
+                <div className={`av ${message.role === 'user' ? 'av-u' : 'av-b'}`}>
+                  {message.role === 'user' ? 'U' : <img src={TERABITT_LOGO} alt="" className="av-logo" />}
+                </div>
 
                 <div className={`bub ${message.role === 'user' ? 'user' : 'bot'}`}>
                   <div className="chat-markdown">

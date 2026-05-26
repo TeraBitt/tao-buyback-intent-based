@@ -1,0 +1,91 @@
+/* Managed app grids */
+.chat-wrap {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.chat-body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-conversation-grid {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.chat-intro-grid {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.chat-body>.chat-inline-banner {
+  justify-self: center;
+  width: min(900px, calc(100% - 48px));
+}
+
+.chat-conversation-grid>.chat-msgs {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chat-intro-grid>.chat-msgs {
+  align-self: stretch;
+  justify-content: flex-end;
+  overflow: hidden;
+  padding-bottom: 18px;
+}
+
+.chat-intro-grid>.chat-input-area {
+  align-self: start;
+  display: block;
+  flex: initial;
+  padding-top: 0;
+  background: transparent;
+}
+
+.chat-input-row,
+.input-hints {
+  width: min(900px, 100%);
+}
+
+.chat-wrap--intro .chat-input-row,
+.chat-wrap--intro .input-hints {
+  width: min(720px, 100%);
+}
+
+.chat-wrap--intro .chat-msgs {
+  flex: initial;
+  padding-top: 0;
+}
+
+.chat-wrap--intro .chat-input-area {
+  flex: initial;
+  padding-bottom: 0;
+}
+
+.chat-textarea {
+  resize: none;
+}
+
+.hist-wrap {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, auto) auto;
+  min-height: 0;
+}
+
+.history-table-shell {
+  display: grid;
+  min-width: 0;
+}
+
+.htable {
+  width: 100%;
+  table-layout: fixed;
+}
+

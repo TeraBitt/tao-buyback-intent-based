@@ -1,0 +1,104 @@
+/* Chat-only tweaks layered after the main chat file. */
+.chat-head {
+  padding-right: 220px;
+}
+
+.chat-head-l .ch-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.chat-title-brand {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  transition: opacity 0.15s ease;
+}
+
+.chat-title-brand:hover {
+  opacity: 0.78;
+}
+
+.ch-title__logo {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 14px rgba(246, 133, 27, 0.22));
+}
+
+.av-b {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.av-logo {
+  width: 19px;
+  height: 19px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.18));
+}
+
+.chat-body {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.chat-body>.chat-inline-banner {
+  margin: 18px auto 0;
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.chat-conversation-grid .msg,
+.chat-intro-grid .msg {
+  flex-direction: row;
+}
+
+.chat-conversation-grid .msg:not(.user),
+.chat-intro-grid .msg:not(.user) {
+  justify-content: flex-start;
+  margin-right: auto;
+}
+
+.chat-conversation-grid .msg.user,
+.chat-intro-grid .msg.user {
+  flex-direction: row;
+  justify-content: flex-end;
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.chat-conversation-grid .bub.user,
+.chat-intro-grid .bub.user {
+  text-align: left;
+}
+
+.chat-wrap--intro .chat-inline-banner {
+  max-width: 760px;
+}
+
+@media (max-width: 920px) {
+  .chat-head {
+    padding-right: 190px;
+  }
+}
+
+@media (max-width: 640px) {
+  .chat-head {
+    padding-right: 16px;
+  }
+
+  .chat-head-l .ch-sub {
+    margin-left: 0;
+  }
+
+  .chat-body>.chat-inline-banner {
+    margin-top: 12px;
+  }
+}

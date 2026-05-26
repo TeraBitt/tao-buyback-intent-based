@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { ArrowLeft, History, MessageCircle, PanelLeftClose, PanelLeftOpen, Repeat2 } from 'lucide-react';
+import { History, LogOut, MessageCircle, PanelLeftClose, PanelLeftOpen, Repeat2, Wallet } from 'lucide-react';
 import type { AppView } from '../types';
 
 interface AppShellProps {
@@ -11,7 +11,6 @@ interface AppShellProps {
   onDisconnectWallet: () => void;
   onConnectWallet: () => void;
   onLoadHistory: () => void;
-  onReturnLanding: () => void;
   onSetAppView: (view: AppView) => void;
 }
 
@@ -24,7 +23,6 @@ export default function AppShell({
   onDisconnectWallet,
   onConnectWallet,
   onLoadHistory,
-  onReturnLanding,
   onSetAppView,
 }: AppShellProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -84,11 +82,6 @@ export default function AppShell({
           </button>
         </div>
 
-        <button type="button" className="back-link app-sidebar__back" onClick={onReturnLanding} title="Back to site">
-          <ArrowLeft size={14} />
-          <span>Back to site</span>
-        </button>
-
         <div className="app-sidebar__section-label">Workspace</div>
         <nav className="app-sidebar__nav" aria-label="App navigation">
           {navigationItems.map((item) => (
@@ -109,32 +102,25 @@ export default function AppShell({
           ))}
         </nav>
 
-        {account ? (
-          <div className="app-sidebar__footer">
-            <div className="wpill">
-              <div className="wdot" />
-              <div className="waddr">{formatShortValue(account, 6, 4)}</div>
-              <div className="wnet">Testnet</div>
-            </div>
-            <button type="button" className="sidebar-disconnect" onClick={onDisconnectWallet}>
-              Disconnect
-            </button>
-          </div>
-        ) : (
-          <div className="app-sidebar__footer">
-            <button
-              type="button"
-              className="tao-btn tao-btn--primary sidebar-connect"
-              onClick={onConnectWallet}
-              style={{ width: '100%', whiteSpace: 'nowrap' }}
-            >
-              Connect wallet
-            </button>
-          </div>
-        )}
       </aside>
 
       <section className="app-main">
+        <div className="app-main__wallet">
+          {account ? (
+            <div className="app-wallet-chip" title={account}>
+              <span className="app-wallet-chip__dot" />
+              <span>{formatShortValue(account, 6, 4)}</span>
+              <button type="button" onClick={onDisconnectWallet} aria-label="Disconnect wallet" title="Disconnect wallet">
+                <LogOut size={14} />
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="tao-btn tao-btn--primary app-wallet-connect" onClick={onConnectWallet}>
+              <Wallet size={15} />
+              <span>Connect wallet</span>
+            </button>
+          )}
+        </div>
         {statusBanner}
         {children}
       </section>

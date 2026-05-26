@@ -1,0 +1,154 @@
+/* Final contrast and landing/modal theme pass */
+.btn-primary,
+.tao-btn--primary,
+.swap-action-btn,
+.btn-confirm,
+.send-button,
+.send-btn,
+.tao-demo__send {
+  color: #050505;
+}
+
+.btn-primary svg,
+.tao-btn--primary svg,
+.swap-action-btn svg,
+.btn-confirm svg,
+.send-button svg,
+.send-btn svg,
+.tao-demo__send svg {
+  color: #050505;
+  stroke: #050505;
+}
+
+.swaptog {
+  border-color: transparent;
+  background: var(--brand);
+  color: #050505;
+  font-weight: 700;
+}
+
+.swaptog:hover:not(:disabled) {
+  background: var(--brand-soft);
+}
+
+.swap-mode-row .fp.on {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #050505;
+}
+
+.swap-mode-row .fp.on:hover {
+  color: #050505;
+}
+
+.landing-shell--taochat {
+  min-height: 100vh;
+  background: #050403;
+  color: var(--text);
+}
+
+.landing-shell--taochat .tao-nav {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+  background: rgba(5, 4, 3, 0.92);
+}
+
+.landing-shell--taochat .tao-ticker,
+.landing-shell--taochat .tao-usecases,
+.landing-shell--taochat .tao-chains {
+  border-color: rgba(255, 255, 255, 0.07);
+  background: #080604;
+}
+
+.landing-shell--taochat .tao-badge,
+.landing-shell--taochat .tao-usecases__card,
+.landing-shell--taochat .tao-command-card,
+.landing-shell--taochat .tao-chains__card,
+.landing-shell--taochat .tao-vision__icon {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(22, 17, 13, 0.96), rgba(10, 8, 6, 0.98));
+}
+
+.landing-shell--taochat .tao-usecases__grid {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.landing-shell--taochat .tao-btn--ghost {
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #d6d0ca;
+}
+
+.landing-shell--taochat .tao-btn--ghost:hover:not(:disabled) {
+  border-color: rgba(246, 133, 27, 0.7);
+  color: #f7f3ee;
+}
+
+.wallet-modal-backdrop {
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(12px);
+}
+
+.wallet-modal-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, rgba(22, 17, 13, 0.98), rgba(9, 7, 6, 0.98));
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.64);
+}
+
+.wallet-modal-card__header h3 {
+  color: #faf7f3;
+  letter-spacing: -0.04em;
+}
+
+.wallet-modal-card__close {
+  color: #a9a3a0;
+}
+
+.wallet-modal-card__close:hover {
+  color: #f7f3ee;
+}
+
+.wallet-modal-option {
+  border-color: rgba(var(--wallet-accent-rgb), 0.52);
+  background:
+    linear-gradient(90deg, rgba(var(--wallet-accent-rgb), 0.16), rgba(var(--wallet-accent-rgb), 0.05)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.wallet-modal-option:hover:not(:disabled) {
+  border-color: rgba(var(--wallet-accent-rgb), 0.8);
+  background:
+    linear-gradient(90deg, rgba(var(--wallet-accent-rgb), 0.24), rgba(var(--wallet-accent-rgb), 0.08)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.wallet-modal-option__action {
+  color: #f7f3ee;
+}
+
+@media (max-width: 760px) {
+  .chat-wrap {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  .chat-body {
+    overflow: hidden;
+  }
+
+  .chat-body>.chat-inline-banner,
+  .chat-input-row,
+  .input-hints,
+  .chat-wrap--intro .chat-input-row,
+  .chat-wrap--intro .input-hints {
+    width: min(100%, calc(100vw - 24px));
+  }
+
+  .chat-intro-grid {
+    grid-template-rows: minmax(40px, 1fr) auto minmax(24px, 0.8fr);
+  }
+
+  .chat-intro-grid>.chat-msgs {
+    padding-top: 16px;
+    padding-bottom: 14px;
+  }
+}
+
