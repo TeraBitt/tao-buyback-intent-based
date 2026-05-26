@@ -1,3 +1,15 @@
+import SOL from '../assets/sol.png';
+import ETH from '../assets/eth.png';
+import BASE from '../assets/base.png';
+import TAO from '../assets/tao.png';
+import LOGO from '../assets/terabitt_logo.png';
+import APP_SCREENSHOT from '../assets/app-screenshot1.png';
+
+export const ASSETS = {
+  LOGO,
+  APP_SCREENSHOT,
+};
+
 export const LANDING_TICKER = [
   { label: 'SN19 Vision', value: '34.2% Est. APY', delta: '↑ 2.1%', positive: true },
   { label: 'SN27 Inference', value: '28.6% Est. APY', delta: '↑ 0.8%', positive: true },
@@ -32,18 +44,18 @@ export const VISION_POINTS = [
     icon: '⌘',
     title: 'Intent to action',
     description:
-      'You describe what you want. TaoChat interprets, shows you a full breakdown, and executes only after you confirm.',
+      'You describe what you want. TeraBitt executes only after you confirm.',
   },
   {
     icon: '⇄',
     title: 'Cross-chain next',
     description:
-      'SOL, ETH, and other external-chain routes are coming soon. The live build stays focused on native Bittensor EVM testnet flows for now.',
+      'SOL, ETH, and other external-chain routes are coming soon.',
   },
   {
     icon: '◎',
     title: 'Non-custodial always',
-    description: 'Every action signs from your own wallet. TaoChat never holds funds or keys.',
+    description: 'Every action signs from your own wallet. TeraBitt never holds funds or keys.',
   },
 ];
 
@@ -60,7 +72,7 @@ export const USE_CASES = [
     id: '02',
     icon: '↓',
     title: 'Unstake anytime',
-    description: 'Exit fully or partially with one command. TaoChat handles the unbonding and returns your assets cleanly.',
+    description: 'Exit fully or partially with one command. TeraBitt handles the unbonding and returns your assets cleanly.',
     example: 'Unstake half my Subnet 4 position',
   },
   {
@@ -76,8 +88,8 @@ export const USE_CASES = [
     icon: '↗',
     title: 'Discover top subnets',
     description:
-      'Ask which subnets lead by estimated APY, category, or momentum. Get live data and act on it instantly.',
-    example: 'Which AI subnet has the highest estimated APY?',
+      'Ask which subnets lead by estimated APY, category, or momentum. Get live data from chain and act on it instantly.',
+    example: 'Which AI subnet has the highest APY?',
   },
   {
     id: '05',
@@ -120,8 +132,10 @@ export const HOW_STEPS = [
 ];
 
 export const SUPPORTED_NETWORKS = [
-  { name: 'Solana', symbol: '◎', status: 'Coming soon', style: { background: '#9945FF', color: '#fff' } },
-  { name: 'Ethereum', symbol: '⟠', status: 'Coming soon', style: { background: '#627EEA', color: '#fff' } },
-  { name: 'Bittensor EVM Testnet', symbol: 'τ', status: 'Live', style: { background: '#E8622A', color: '#fff' } },
-  { name: 'BNB Chain', symbol: '⬡', status: 'Coming soon' },
+  { name: 'Solana', symbol: SOL, status: 'Coming soon'},
+  { name: 'Ethereum', symbol: ETH, status: 'Coming soon'},
+  { name: 'Base', symbol: BASE, status: 'Coming soon'},
+  { name: 'Bittensor', symbol: TAO, status: 'Live on testnet'},
 ];
+
+

@@ -1,29 +1,961 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Syne:wght@500;700;800&display=swap');
 
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0
+}
+
+html {
+  scroll-behavior: smooth
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6
+}
+
+a {
+  color: inherit;
+  text-decoration: none
+}
+
+button {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer
+}
+
+img {
+  display: block;
+  max-width: 100%
+}
+
+/* ── BUTTONS ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: transform .15s, background .15s, border-color .15s;
+  white-space: nowrap
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px)
+}
+
+.btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  transform: none
+}
+
+.btn-primary {
+  padding: 9px 22px;
+  background: var(--brand);
+  color: #fff;
+  border: 0
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--brand-light)
+}
+
+.btn-ghost {
+  padding: 8px 20px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--border-2)
+}
+
+.btn-ghost:hover:not(:disabled) {
+  border-color: var(--brand-border);
+  color: var(--text)
+}
+
+.btn-lg {
+  padding: 13px 28px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--r-lg)
+}
+
+/* ── NAV ── */
+.tao-nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  height: 62px;
+  padding: 0 2rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(7, 8, 10, .92);
+  backdrop-filter: blur(20px)
+}
+
+
+
+
+.tao-nav__links {
+  display: flex;
+  align-items: center;
+  gap: 2.2rem
+}
+
+.tao-nav__links a {
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: color .14s
+}
+
+.tao-nav__links a:hover {
+  color: var(--text)
+}
+
+.tao-nav__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px
+}
+
+/* ── STATUS PILL ── */
+.tao-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: rgba(255, 255, 255, .03);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500
+}
+
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%
+}
+
+.status-dot--success {
+  background: var(--success);
+  animation: pulse 2s infinite;
+  box-shadow: 0 0 0 0 rgba(40, 224, 155, .4)
+}
+
+/* ── HERO ── */
+.tao-hero {
+  position: relative;
+  overflow: hidden;
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 9rem 2.5rem 7rem;
+  text-align: center
+}
+
+.tao-hero::before {
+  content: '';
+  position: absolute;
+  top: -80px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 640px;
+  height: 440px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(255, 107, 44, .13), transparent 68%);
+  pointer-events: none;
+  z-index: 0
+}
+
+.tao-hero>* {
+  position: relative;
+  z-index: 1
+}
+
+.tao-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2rem;
+  padding: 5px 16px;
+  border: 1px solid var(--border-2);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase
+}
+
+.tao-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: pulse 2s infinite;
+  box-shadow: 0 0 0 0 rgba(40, 224, 155, .42)
+}
+
+/* Fraunces at display size: optical axis 'WONK' gives ink-trap character, feels handcrafted */
+.tao-hero h1 {
+  font-family: var(--font-disp);
+  font-size: clamp(46px, 8.5vw, 88px);
+  font-weight: 900;
+
+  line-height: 0.93;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  font-optical-sizing: auto;
+}
+
+.tao-hero h1 em {
+  color: var(--brand);
+  font-style: normal;
+  font-weight: 900
+}
+
+.tao-hero h1 span.roman {
+  font-style: normal
+}
+
+.tao-hero p {
+  max-width: 500px;
+  margin: 1.6rem auto 0;
+  color: var(--text-2);
+  font-size: 15.5px;
+  line-height: 1.78;
+  font-weight: 300
+}
+
+.tao-hero__actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 2.6rem
+}
+
+/* ── TICKER ── */
+.tao-ticker {
+  overflow: hidden;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1)
+}
+
+.tao-ticker__track {
+  display: flex;
+  gap: 3rem;
+  min-width: max-content;
+  white-space: nowrap;
+  animation: ticker-scroll 22s linear infinite
+}
+
+.tao-ticker__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 400
+}
+
+.tao-ticker__label {
+  color: var(--text-2);
+  font-weight: 600;
+  letter-spacing: 0.01em
+}
+
+.is-positive {
+  color: var(--success)
+}
+
+.is-negative {
+  color: var(--danger)
+}
+
+/* ── SECTION TAGS ── */
+.tao-section-tag {
+  margin-bottom: .65rem;
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.tao-section-title {
+  font-family: var(--font-disp);
+  font-size: clamp(26px, 4vw, 40px);
+  font-weight: 800;
+
+  letter-spacing: -0.025em;
+  line-height: 1.06;
+  color: var(--text);
+  font-optical-sizing: auto;
+}
+
+.tao-section-title em {
+  color: var(--brand);
+  font-style: normal
+}
+
+.tao-section-title--demo {
+  margin-bottom: 1.5rem;
+  font-size: 22px;
+  font-weight: 700;
+  font-style: normal;
+  letter-spacing: -0.02em;
+}
+
+/* ── DEMO ── */
+.tao-demo {
+  padding: 8.5rem 2.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1)
+}
+
+
+.tao-logo__image {
+  width: 30px;
+  height: auto;
+  margin-right: 2px;
+  display: inline;
+  object-fit: contain;
+}
+
+
+.tao-demo__inner {
+
+  margin: 5rem;
+  border-radius: 20px;
+  display: flex;
+  background-color: transparent;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tao-demo__window {
+  overflow: hidden;
+  margin-top: 3rem;
+  border-radius: var(--r-lg);
+  background: transparent;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, .45)
+}
+
+.tao-demo__bar,
+.tao-demo__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2)
+}
+
+.tao-demo__footer {
+  border-top: 1px solid var(--border);
+  border-bottom: 0
+}
+
+.tao-demo__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .01em
+}
+
+.tao-demo__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand)
+}
+
+.tao-demo__connected {
+  color: var(--success);
+  font-size: 11px;
+  font-weight: 500
+}
+
+
+
+.tao-demo__row {
+  display: flex
+}
+
+.tao-demo__row--user {
+  justify-content: flex-end
+}
+
+.tao-demo__bubble {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.58
+}
+
+.tao-demo__bubble--user {
+  background: var(--brand);
+  color: #fff;
+  border-radius: 14px 14px 3px 14px
+}
+
+.tao-demo__bubble--bot {
+  border: 1px solid var(--border-2);
+  border-radius: 3px 14px 14px 14px;
+  background: var(--surface-2);
+  color: var(--text)
+}
+
+
+
+.tao-demo__ok::before {
+  content: '✓';
+  font-size: 11px
+}
+
+.tao-demo__input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  color: var(--text-3);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  outline: none
+}
+
+.tao-demo__send {
+  padding: 7px 16px;
+  border-radius: var(--r-md);
+  background: var(--brand);
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600
+}
+
+.tao-demo__send:hover {
+  background: var(--brand-light)
+}
+
+/* ── VISION ── */
+.tao-vision {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5rem;
+  align-items: center;
+  max-width: 1060px;
+  margin: 0 auto;
+  padding: 7rem 2.5rem
+}
+
+.tao-vision__title em {
+  color: var(--brand);
+  font-style: normal
+}
+
+.tao-vision__copy {
+  margin-bottom: .9rem;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.82;
+  font-weight: 300
+}
+
+.tao-vision__points {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 1.5rem
+}
+
+.tao-vision__point {
+  display: flex;
+  gap: 12px
+}
+
+.tao-vision__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 1px solid var(--brand-border);
+  border-radius: var(--r-md);
+  background: var(--brand-dim);
+  color: var(--brand);
+  font-size: 14px
+}
+
+.tao-vision__point h3 {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.01em
+}
+
+.tao-vision__point p {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.65;
+  font-weight: 300;
+  margin-top: 2px
+}
+
+/* ── COMMAND CARDS ── */
+.tao-command-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px
+}
+
+.tao-command-card {
+  padding: 13px 15px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-lg);
+  background: var(--surface)
+}
+
+.tao-command-card__label {
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase
+}
+
+.tao-command-card__prompt {
+  margin-top: 7px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--brand);
+  border-radius: var(--r-sm);
+  background: rgba(255, 107, 44, .07);
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.5
+}
+
+.tao-command-card__result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 400
+}
+
+.tao-command-card__result-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0
+}
+
+/* ── USE CASES ── */
+.tao-usecases {
+  padding: 5.5rem 2.5rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1)
+}
+
+.tao-usecases__inner {
+  max-width: 1060px;
+  margin: 0 auto
+}
+
+.tao-usecases__header {
+  margin-bottom: 3rem;
+  text-align: center
+}
+
+.tao-usecases__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border-radius: var(--r-xl);
+  overflow: hidden
+}
+
+.tao-usecases__card {
+  padding: 1.75rem 1.5rem;
+  background: var(--bg-1);
+  transition: background .15s
+}
+
+.tao-usecases__card:hover {
+  background: var(--surface)
+}
+
+.tao-usecases__index {
+  margin-bottom: .7rem;
+  color: var(--brand);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em
+}
+
+.tao-usecases__icon {
+  margin-bottom: .6rem;
+  color: var(--brand);
+  font-size: 22px
+}
+
+
+
+.tao-usecases__card p {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.68;
+  font-weight: 300
+}
+
+.tao-usecases__example {
+  margin-top: .9rem;
+  padding: 7px 11px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: 12px;
+  font-style: italic
+}
+
+.tao-usecases__example span {
+  color: var(--brand);
+  font-style: normal;
+  font-weight: 500
+}
+
+/* ── HOW IT WORKS ── */
+.tao-how {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 6rem 2.5rem;
+  text-align: center
+}
+
+.tao-how__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin-top: 3rem
+}
+
+.tao-how__step {
+  position: relative;
+  padding: 0 1.25rem
+}
+
+.tao-how__step:not(:last-child)::after {
+  content: '→';
+  position: absolute;
+  top: 12px;
+  right: -8px;
+  color: var(--border-3);
+  font-size: 14px
+}
+
+.tao-how__step-title {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin-bottom: .4rem
+}
+
+.tao-how__step-copy {
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.62;
+  font-weight: 300
+}
+
+/* ── CHAINS ── */
+.tao-chains {
+  padding: 5.5rem 2.5rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1)
+}
+
+.tao-chains__inner {
+  max-width: 960px;
+  margin: 0 auto;
+  text-align: center
+}
+
+.tao-chains__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  max-width: 960px;
+  margin: 2rem auto 0
+}
+
+.tao-chains__card {
+  padding: 0.35rem 1rem;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  text-align: center
+}
+
+
+.tao-chains__name {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em
+}
+
+.tao-chains__status {
+  color: var(--success);
+  font-size: 11.5px;
+  font-weight: 500;
+  margin-top: 4px
+}
+
+.tao-chains__status--soon {
+  color: var(--warning)
+}
+
+/* ── CTA ── */
+.tao-cta {
+  padding: 6.5rem 2.5rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden
+}
+
+.tao-cta::before {
+  content: '';
+  position: absolute;
+  top: -60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 640px;
+  height: 380px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(255, 107, 44, .12), transparent 68%);
+  pointer-events: none
+}
+
+.tao-cta__inner {
+  position: relative;
+  z-index: 1;
+  max-width: 640px;
+  margin: 0 auto
+}
+
+.tao-cta__title {
+  font-family: var(--font-disp);
+  font-size: clamp(32px, 5.5vw, 56px);
+  font-weight: 900;
+
+  letter-spacing: -0.03em;
+  line-height: 1.0;
+  color: var(--text);
+  font-optical-sizing: auto;
+}
+
+.tao-cta__title em {
+  color: var(--brand);
+  font-style: normal
+}
+
+.tao-cta p {
+  max-width: 460px;
+  margin: 1.1rem auto 0;
+  color: var(--text-2);
+  font-size: 15px;
+  line-height: 1.75;
+  font-weight: 300
+}
+
+/* ── FOOTER ── */
+.tao-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.8rem 2.5rem 2.4rem;
+  border-top: 1px solid var(--border)
+}
+
+.tao-footer__links {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem
+}
+
+.tao-footer__links a {
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: color .14s
+}
+
+.tao-footer__links a:hover {
+  color: var(--text)
+}
+
+.tao-footer__copy {
+  color: var(--text-4);
+  font-size: 12px;
+  font-weight: 400
+}
+
+/* ── WALLET INLINE ── */
+.wallet-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px
+}
+
+/* ── ANIMATIONS ── */
+
+
+/* ── RESPONSIVE ── */
+@media(max-width:1100px) {
+  .tao-vision {
+    grid-template-columns: 1fr;
+    gap: 2.5rem
+  }
+
+  .tao-chains__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr))
+  }
+
+  .tao-usecases__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr))
+  }
+}
+
+@media(max-width:920px) {
+  .tao-nav {
+    padding: 0 1rem
+  }
+
+  .tao-nav__links {
+    display: none
+  }
+
+  .tao-how__steps,
+  .tao-usecases__grid,
+  .tao-chains__grid {
+    grid-template-columns: 1fr
+  }
+
+  .tao-how__step:not(:last-child)::after {
+    display: none
+  }
+
+  .tao-vision,
+  .tao-how,
+  .tao-demo,
+  .tao-usecases,
+  .tao-chains,
+  .tao-cta {
+    padding-right: 1.2rem;
+    padding-left: 1.2rem
+  }
+
+  .tao-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 1.4rem 1.2rem 2rem
+  }
+
+  .tao-footer__copy {
+    text-align: left
+  }
+}
+
+@media(max-width:680px) {
+  .tao-hero {
+    padding: 5.5rem 1.2rem 4rem
+  }
+
+  .tao-demo__bar,
+  .tao-demo__footer {
+    flex-direction: column;
+    align-items: flex-start
+  }
+
+  .tao-demo__bubble {
+    max-width: 100%
+  }
+}
+
 :root {
-  --brand: #ff6b2c;
-  --brand-soft: #ff8a4c;
-  --brand-dark: #1b2028;
+  --brand: #e8e8e8;
+  --brand-soft: #f5f5f5;
+  --brand-dark: #111318;
   --success: #27e09a;
   --danger: #ff5b4f;
   --warning: #f5c84b;
 
-  --bg: #08090b;
-  --bg-2: #0d1014;
-  --bg-3: #11151b;
-  --surface: #141820;
-  --surface-2: #191f28;
-  --surface-3: #222a35;
-  --surface-4: rgba(255, 255, 255, 0.045);
+  --bg: #080809;
+  --bg-2: #0d0d0f;
+  --bg-3: #111114;
+  --surface: #151519;
+  --surface-2: #1a1a1f;
+  --surface-3: #202026;
+  --surface-4: rgba(255, 255, 255, 0.04);
 
-  --border: #252c36;
-  --border-2: #303946;
-  --border-3: #465363;
+  --border: #222226;
+  --border-2: #2e2e34;
+  --border-3: #3d3d46;
 
-  --text: #f5f7fa;
-  --text-2: #d2d9e3;
-  --text-3: #9aa7b6;
-  --text-4: #748192;
+  --text: #f7f7f8;
+  --text-2: #c8c8ce;
+  --text-3: #888890;
+  --text-4: #545460;
 
   --shadow-lg: 0 32px 80px rgba(0, 0, 0, 0.45);
   --shadow-md: 0 18px 50px rgba(0, 0, 0, 0.32);
@@ -32,8 +964,8 @@
   --radius-md: 14px;
   --radius-sm: 10px;
 
-  --font-display: 'Syne', sans-serif;
-  --font-body: 'DM Sans', sans-serif;
+  --font-display: 'SYSTEM-UI', sans-serif;
+  --font-body: 'SYSTEM-UI', sans-serif;
 }
 
 * {
@@ -217,7 +1149,7 @@ img {
   font-family: var(--font-display);
   font-size: 1.1rem;
   font-weight: 800;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.01em;
 }
 
 .brand-lockup__wordmark b {
@@ -1039,7 +1971,7 @@ img {
   font-family: var(--font-display);
   font-size: 1.65rem;
   font-weight: 700;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.01em;
 }
 
 .stat-card__value span {
@@ -1092,7 +2024,7 @@ img {
 .dashboard-panel__header h3 {
   font-family: var(--font-display);
   font-size: 1.3rem;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.01em;
 }
 
 .segmented-control {
@@ -1684,7 +2616,7 @@ img {
   color: #fff;
 }
 
-.chat-markdown > * + * {
+.chat-markdown>*+* {
   margin-top: 0.75rem;
 }
 
@@ -1884,6 +2816,7 @@ img {
 }
 
 @media (max-width: 1100px) {
+
   .stats-grid,
   .loading-shell {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1966,6 +2899,7 @@ img {
 }
 
 @media (max-width: 680px) {
+
   .hero-section,
   .section-shell {
     padding-right: 1.2rem;
@@ -2017,16 +2951,16 @@ body {
   line-height: 1.6;
 }
 
-.landing-shell--taochat {
+.landing-shell--TeraBitt {
   background: var(--bg);
   color: var(--text);
 }
 
 .tao-logo {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 800;
-  letter-spacing: -0.03em;
+  letter-spacing: 0.03em;
   color: var(--text);
 }
 
@@ -2124,7 +3058,7 @@ body {
   padding: 8px 20px;
   border: 0;
   background: var(--brand);
-  color: #fff;
+  color: #000000;
 }
 
 .tao-btn--primary:hover:not(:disabled) {
@@ -2174,7 +3108,7 @@ body {
   font-size: clamp(42px, 8vw, 82px);
   font-weight: 800;
   line-height: 0.96;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.01em;
 }
 
 .tao-hero h1 em,
@@ -2230,23 +3164,6 @@ body {
   font-weight: 500;
 }
 
-.tao-demo {
-  padding: 5rem 2.5rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-2);
-}
-
-.tao-demo__inner,
-.tao-usecases__inner,
-.tao-chains__inner {
-  max-width: 1000px;
-  margin: 0 auto;
-}
-
-.tao-demo__inner {
-  max-width: 660px;
-}
-
 .tao-section-tag {
   margin-bottom: 0.6rem;
   color: var(--text-3);
@@ -2261,6 +3178,7 @@ body {
   font-size: clamp(24px, 4vw, 38px);
   font-weight: 800;
   letter-spacing: -0.03em;
+  margin-bottom: 5rem;
 }
 
 .tao-section-title--demo {
@@ -2270,14 +3188,7 @@ body {
   letter-spacing: -0.02em;
 }
 
-.tao-demo__window,
-.chat-surface {
-  overflow: hidden;
-  border: 1px solid var(--border-2);
-  border-radius: 12px;
-  background: var(--surface);
-  box-shadow: var(--shadow-lg);
-}
+
 
 .tao-demo__bar,
 .tao-demo__footer {
@@ -2315,12 +3226,55 @@ body {
   color: var(--success);
   font-size: 11px;
 }
+.border-glow-wrapper {
+  position: relative;
+  border-radius: 14px;
+  padding:3px;
+  background: transparent;
+}
+
+.border-glow-wrapper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--angle, 0deg),
+    transparent 0%,
+    transparent 70%,
+    #ff6a00 80%,
+    #ff9a3c 90%,
+    transparent 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: spin-border 8.4s linear infinite;
+}
+
+@property --angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes spin-border {
+  to {
+    --angle: 360deg;
+  }
+}
 
 .tao-demo__body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 1.25rem;
+  gap: 44px;
+  padding: 2.25rem;
 }
 
 .tao-demo__row {
@@ -2341,7 +3295,7 @@ body {
 
 .tao-demo__bubble--user {
   background: var(--brand);
-  color: #fff;
+  color: #000000;
 }
 
 .tao-demo__bubble--bot {
@@ -2355,11 +3309,12 @@ body {
   align-items: center;
   gap: 6px;
   margin-top: 8px;
-  padding: 4px 10px;
-  border: 1px solid rgba(46, 204, 138, 0.35);
-  border-radius: 20px;
-  background: rgba(46, 204, 138, 0.12);
-  color: var(--success);
+  margin-left: 12px;
+  padding: 2px 10px;
+  border: 0px solid rgba(183, 183, 183, 0.35);
+  border-radius: 5px;
+  background: rgba(204, 107, 46, 0.12);
+  color: rgb(230, 230, 230);
   font-size: 12px;
 }
 
@@ -2392,9 +3347,10 @@ body {
 .tao-cta__title {
   color: var(--text);
   font-family: var(--font-display);
-  font-size: clamp(26px, 4vw, 40px);
+  font-size: clamp(30px, 5vw, 55px);
+  margin-bottom: 18px;
   font-weight: 800;
-  line-height: 1.1;
+  line-height: 0.9;
   letter-spacing: -0.03em;
 }
 
@@ -2437,14 +3393,14 @@ body {
 .tao-chains__name,
 .tao-how__step-title {
   color: var(--text);
-  font-size: 14.5px;
+  font-size: 20px;
   font-weight: 500;
 }
 
 .tao-vision__point p,
 .tao-usecases__card p,
 .tao-how__step-copy {
-  color: var(--text-2);
+  color: var(--text-3);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -2554,7 +3510,7 @@ body {
 }
 
 .tao-how {
-  max-width: 800px;
+  max-width: 1000px;
   margin: 0 auto;
   padding: 6rem 2.5rem;
   text-align: center;
@@ -2614,20 +3570,17 @@ body {
 }
 
 .tao-chains__card {
-  padding: 1.35rem 1rem;
-  border: 1px solid var(--border-2);
+  padding: 1.35rem 0rem;
   border-radius: 18px;
-  background: var(--surface);
+  background: transparent;
   text-align: center;
 }
 
 .tao-chains__icon {
   display: grid;
   place-items: center;
-  width: 42px;
   height: 42px;
   margin: 0 auto 0.8rem;
-  border-radius: 50%;
   font-weight: 700;
 }
 
@@ -2812,6 +3765,7 @@ body {
 }
 
 @media (max-width: 1100px) {
+
   .tao-vision,
   .tao-chains__grid {
     grid-template-columns: 1fr;
@@ -4130,96 +5084,6 @@ body {
   text-align: center;
 }
 
-.history-table-shell {
-  display: block;
-  width: 100%;
-  overflow-x: auto;
-  border: 1px solid var(--border-2);
-  border-radius: 12px;
-  background: var(--surface);
-}
-
-.history-explorer-grid {
-  display: flex;
-  flex-direction: column;
-  min-width: 850px;
-}
-
-.history-grid-header {
-  display: grid;
-  grid-template-columns: 140px 100px 1fr 140px 90px 140px;
-  gap: 12px;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border-2);
-  background: rgba(255, 255, 255, 0.015);
-  color: var(--text-3);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-}
-
-.history-grid-row {
-  display: grid;
-  grid-template-columns: 140px 100px 1fr 140px 90px 140px;
-  gap: 12px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  align-items: center;
-  transition: background 0.12s ease;
-}
-
-.history-grid-row:last-child {
-  border-bottom: none;
-}
-
-.history-grid-row:hover {
-  background: rgba(255, 255, 255, 0.012);
-}
-
-.gd-date {
-  color: var(--text-2);
-  font-size: 12.5px;
-}
-
-.gd-type {
-  display: flex;
-  align-items: center;
-}
-
-.gd-details {
-  color: var(--text);
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.gd-amount {
-  font-family: var(--font-display);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.gd-status {
-  color: var(--success);
-  font-size: 12px;
-}
-
-.gd-hash {
-  font-size: 12px;
-}
-
-.gd-hash .tx-hash {
-  color: var(--text-3);
-  font-family: monospace;
-}
-
-.gd-hash .tx-hash:hover {
-  color: var(--brand);
-}
-
-
 .empty {
   padding: 4rem 1rem;
   color: var(--text-3);
@@ -4806,7 +5670,7 @@ body {
 }
 
 .sn-apy__value,
-.sn-apy > span {
+.sn-apy>span {
   color: var(--success);
   font-size: 13px;
   font-weight: 800;
@@ -4911,6 +5775,7 @@ body {
 }
 
 @media (max-width: 680px) {
+
   .chat-head,
   .swap-head,
   .hist-top,
@@ -5330,7 +6195,6 @@ body {
 }
 
 .msg.user {
-  flex-direction: row;
   justify-content: flex-end;
   margin-left: 0;
 }
@@ -5808,6 +6672,7 @@ body {
 }
 
 @media (max-width: 920px) {
+
   .dashboard-shell,
   .dashboard-shell.is-sidebar-collapsed {
     grid-template-columns: 1fr;
@@ -5973,24 +6838,24 @@ body {
   min-height: 0;
 }
 
-.chat-body > .chat-inline-banner {
+.chat-body>.chat-inline-banner {
   justify-self: center;
   width: min(900px, calc(100% - 48px));
 }
 
-.chat-conversation-grid > .chat-msgs {
+.chat-conversation-grid>.chat-msgs {
   min-height: 0;
   overflow-y: auto;
 }
 
-.chat-intro-grid > .chat-msgs {
+.chat-intro-grid>.chat-msgs {
   align-self: stretch;
   justify-content: flex-end;
   overflow: hidden;
   padding-bottom: 18px;
 }
 
-.chat-intro-grid > .chat-input-area {
+.chat-intro-grid>.chat-input-area {
   align-self: start;
   display: block;
   flex: initial;
@@ -6024,16 +6889,145 @@ body {
 
 .hist-wrap {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, auto) auto;
   min-height: 0;
-  overflow-y: auto;
 }
 
-.history-grid {
+.history-table-shell {
+  display: grid;
   min-width: 0;
-  align-content: start;
 }
 
+.htable {
+  width: 100%;
+  table-layout: fixed;
+}
+
+/* Final contrast and landing/modal theme pass */
+.btn-primary,
+.tao-btn--primary,
+.swap-action-btn,
+.btn-confirm,
+.send-button,
+.send-btn,
+.tao-demo__send {
+  color: #050505;
+}
+
+.btn-primary svg,
+.tao-btn--primary svg,
+.swap-action-btn svg,
+.btn-confirm svg,
+.send-button svg,
+.send-btn svg,
+.tao-demo__send svg {
+  color: #050505;
+  stroke: #050505;
+}
+
+.swaptog {
+  border-color: transparent;
+  background: var(--brand);
+  color: #050505;
+  font-weight: 700;
+}
+
+.swaptog:hover:not(:disabled) {
+  background: var(--brand-soft);
+}
+
+.swap-mode-row .fp.on {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #050505;
+}
+
+.swap-mode-row .fp.on:hover {
+  color: #050505;
+}
+
+.landing-shell--taochat {
+  min-height: 100vh;
+  background: #050403;
+  color: var(--text);
+}
+
+.landing-shell--taochat .tao-nav {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+  background: rgba(5, 4, 3, 0.92);
+}
+
+.landing-shell--taochat .tao-ticker,
+.landing-shell--taochat .tao-usecases,
+.landing-shell--taochat .tao-chains {
+  border-color: rgba(255, 255, 255, 0.07);
+  background: #080604;
+}
+
+.landing-shell--taochat .tao-badge,
+.landing-shell--taochat .tao-usecases__card,
+.landing-shell--taochat .tao-command-card,
+.landing-shell--taochat .tao-chains__card,
+.landing-shell--taochat .tao-vision__icon {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(22, 17, 13, 0.96), rgba(10, 8, 6, 0.98));
+}
+
+.landing-shell--taochat .tao-usecases__grid {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.landing-shell--taochat .tao-btn--ghost {
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #d6d0ca;
+}
+
+.landing-shell--taochat .tao-btn--ghost:hover:not(:disabled) {
+  border-color: rgba(246, 133, 27, 0.7);
+  color: #f7f3ee;
+}
+
+.wallet-modal-backdrop {
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(12px);
+}
+
+.wallet-modal-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, rgba(22, 17, 13, 0.98), rgba(9, 7, 6, 0.98));
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.64);
+}
+
+.wallet-modal-card__header h3 {
+  color: #faf7f3;
+  letter-spacing: -0.04em;
+}
+
+.wallet-modal-card__close {
+  color: #a9a3a0;
+}
+
+.wallet-modal-card__close:hover {
+  color: #f7f3ee;
+}
+
+.wallet-modal-option {
+  border-color: rgba(var(--wallet-accent-rgb), 0.52);
+  background:
+    linear-gradient(90deg, rgba(var(--wallet-accent-rgb), 0.16), rgba(var(--wallet-accent-rgb), 0.05)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.wallet-modal-option:hover:not(:disabled) {
+  border-color: rgba(var(--wallet-accent-rgb), 0.8);
+  background:
+    linear-gradient(90deg, rgba(var(--wallet-accent-rgb), 0.24), rgba(var(--wallet-accent-rgb), 0.08)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.wallet-modal-option__action {
+  color: #f7f3ee;
+}
 
 @media (max-width: 760px) {
   .chat-wrap {
@@ -6045,7 +7039,7 @@ body {
     overflow: hidden;
   }
 
-  .chat-body > .chat-inline-banner,
+  .chat-body>.chat-inline-banner,
   .chat-input-row,
   .input-hints,
   .chat-wrap--intro .chat-input-row,
@@ -6057,9 +7051,352 @@ body {
     grid-template-rows: minmax(40px, 1fr) auto minmax(24px, 0.8fr);
   }
 
-  .chat-intro-grid > .chat-msgs {
+  .chat-intro-grid>.chat-msgs {
     padding-top: 16px;
     padding-bottom: 14px;
   }
 }
 
+/* History view repair */
+.hist-wrap {
+  display: flex;
+  min-height: 0;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 0;
+  padding: 2rem clamp(1.2rem, 3vw, 2.75rem);
+  background:
+    radial-gradient(circle at top right, rgba(246, 133, 27, 0.045), transparent 34%),
+    #080604;
+}
+
+.hist-top,
+.history-subbar,
+.history-table-shell,
+.history-pagination {
+  width: min(100%, 1500px);
+}
+
+.hist-top {
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.hist-top h2 {
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+
+.history-subbar {
+  margin-bottom: 1rem;
+}
+
+.history-note {
+  color: #928b86;
+  font-size: 13px;
+}
+
+.history-table-shell {
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: #0d0f13;
+  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.26);
+}
+
+.hist-wrap,
+.history-table-shell {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(246, 133, 27, 0.72) rgba(255, 255, 255, 0.045);
+}
+
+.hist-wrap::-webkit-scrollbar,
+.history-table-shell::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.hist-wrap::-webkit-scrollbar-track,
+.history-table-shell::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
+    #080604;
+}
+
+.hist-wrap::-webkit-scrollbar-thumb,
+.history-table-shell::-webkit-scrollbar-thumb {
+  border: 2px solid #080604;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, #f6a15a, #f6851b 48%, #8e3e12);
+  box-shadow: 0 0 16px rgba(246, 133, 27, 0.34);
+}
+
+.hist-wrap::-webkit-scrollbar-thumb:hover,
+.history-table-shell::-webkit-scrollbar-thumb:hover {
+  background:
+    linear-gradient(180deg, #ffd1a8, #f6a15a 48%, #b75216);
+}
+
+.hist-wrap::-webkit-scrollbar-corner,
+.history-table-shell::-webkit-scrollbar-corner {
+  background: #080604;
+}
+
+.hist-wrap::-webkit-scrollbar-button,
+.history-table-shell::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.history-explorer-grid {
+  min-width: 940px;
+}
+
+.history-grid-header,
+.history-grid-row {
+  display: grid;
+  grid-template-columns: minmax(132px, 0.85fr) 116px minmax(320px, 2.7fr) minmax(132px, 0.9fr) 96px 144px;
+  align-items: center;
+  gap: 16px;
+}
+
+.history-grid-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 13px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #11151b;
+  color: #817b76;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+
+.history-grid-body {
+  display: block;
+}
+
+.history-grid-row {
+  min-height: 74px;
+  padding: 15px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  color: var(--text);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.history-grid-row:last-child {
+  border-bottom: 0;
+}
+
+.history-grid-row:hover {
+  background: rgba(255, 255, 255, 0.026);
+}
+
+.gd-date {
+  color: #ded8d2;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.gd-type {
+  min-width: 0;
+}
+
+.gd-details {
+  min-width: 0;
+  overflow: hidden;
+  color: #f4f0ec;
+  font-size: 13.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gd-amount {
+  font-size: 13.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.gd-status {
+  color: #cfc8c1;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.gd-hash {
+  min-width: 0;
+}
+
+.gd-hash .tx-hash {
+  max-width: 100%;
+  color: #8d969f;
+  font-size: 12px;
+}
+
+.gd-hash .tx-hash:hover {
+  color: #f6a15a;
+}
+
+.tt {
+  min-width: 82px;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.tt-s {
+  background: rgba(39, 224, 154, 0.12);
+  color: #5ff0b8;
+}
+
+.tt-u {
+  background: rgba(255, 255, 255, 0.08);
+  color: #d8d0ca;
+}
+
+.tt-x {
+  background: rgba(158, 119, 221, 0.18);
+  color: #c9a7ff;
+}
+
+.history-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.95rem;
+  padding-top: 0.95rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.history-pagination__range,
+.history-pagination__page {
+  color: #928b86;
+  font-size: 12px;
+}
+
+.history-pagination__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.history-pagination__button {
+  min-width: 82px;
+  border-radius: 8px;
+}
+
+@media (max-width: 760px) {
+  .hist-wrap {
+    padding: 1rem;
+  }
+
+  .hist-top,
+  .history-pagination {
+    align-items: stretch;
+  }
+
+  .history-table-shell {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .history-explorer-grid {
+    min-width: 0;
+  }
+
+  .history-grid-header {
+    display: none;
+  }
+
+  .history-grid-body {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .history-grid-row {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+    min-height: 0;
+    padding: 0.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    background: #0d0f13;
+  }
+
+  .gd-date,
+  .gd-type,
+  .gd-details,
+  .gd-amount,
+  .gd-status,
+  .gd-hash {
+    display: grid;
+    grid-template-columns: minmax(72px, 0.34fr) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    white-space: normal;
+  }
+
+  .gd-date::before {
+    content: "Date";
+  }
+
+  .gd-type::before {
+    content: "Type";
+  }
+
+  .gd-details::before {
+    content: "Details";
+  }
+
+  .gd-amount::before {
+    content: "Amount";
+  }
+
+  .gd-status::before {
+    content: "Status";
+  }
+
+  .gd-hash::before {
+    content: "Tx hash";
+  }
+
+  .gd-date::before,
+  .gd-type::before,
+  .gd-details::before,
+  .gd-amount::before,
+  .gd-status::before,
+  .gd-hash::before {
+    color: #817b76;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .gd-details {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .tt {
+    width: fit-content;
+  }
+
+  .history-pagination__controls {
+    justify-content: space-between;
+  }
+}
