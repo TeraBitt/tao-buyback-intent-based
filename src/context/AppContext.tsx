@@ -40,7 +40,7 @@ import {
   mergeHistoryEvents,
   type HistoryCacheEntry,
 } from '../utils/history';
-import { activeProvider, setActiveProvider, directProvider, logRejectedRpcResult, settleRpcBatch, stakingPrecompile, toBigIntOrZero, withRpcBackoff } from '../utils/rpc';
+import { activeProvider, logRejectedRpcResult, settleRpcBatch, stakingPrecompile, toBigIntOrZero, withRpcBackoff } from '../utils/rpc';
 import { decodeDelegations, decodeSubnetCatalog } from '../utils/scaleDecoders';
 import { simulateStakeAlpha, simulateSwapAlpha, simulateUnstakeTao } from '../utils/simulations';
 import { getHotkeyForNetuid, getMockApyForNetuid, getSubnetLabel, getSubnetPresentation } from '../utils/subnets';
