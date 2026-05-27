@@ -3,7 +3,7 @@ import { CONFIG } from '../config';
 import type { HistorySource, StakeEvent } from '../types';
 import { contractInterface, stakingCallInterface } from './contracts';
 import { formatShortValue, formatTokenAmount, normalizeAddress } from './formatters';
-import { directProvider, logRejectedRpcResult, settleRpcBatch, withRpcBackoff } from './rpc';
+import { activeProvider, logRejectedRpcResult, settleRpcBatch, withRpcBackoff } from './rpc';
 import { getSubnetLabel } from './subnets';
 
 export const HISTORY_PAGE_SIZE = 10;
@@ -64,7 +64,7 @@ const getTimestampFromNonce = (nonce?: string) => {
 };
 
 const fetchPagedIntentFilledLogs = async (userAddress?: string) => {
-  const latestBlock = await withRpcBackoff(() => directProvider.getBlockNumber());
+  const latestBlock = await withRpcBackoff(() => activeProvider.getBlockNumber());
   const topics = getIntentFilledTopics(userAddress);
   const ranges: { fromBlock: number; toBlock: number }[] = [];
 
@@ -77,7 +77,7 @@ const fetchPagedIntentFilledLogs = async (userAddress?: string) => {
 
   const results = await settleRpcBatch(() =>
     ranges.map((range) =>
-      directProvider.getLogs({
+      activeProvider.getLogs({
         address: CONFIG.CONTRACT_ADDRESS,
         topics,
         fromBlock: range.fromBlock,
@@ -98,7 +98,7 @@ const fetchHistoryTransactions = async (logs: ethers.Log[]) => {
   if (logs.length === 0) return [];
 
   const results = await settleRpcBatch(() =>
-    logs.map((log) => directProvider.send('eth_getTransactionByHash', [log.transactionHash])),
+    logs.map((log) => activeProvider.send('eth_getTransactionByHash', [log.transactionHash])),
   );
 
   return results.map((result, index) => {
@@ -192,7 +192,7 @@ export const fetchIntentFilledLogGroups = async (userAddress?: string) => {
 
   const results = await settleRpcBatch(() =>
     targets.map((target) =>
-      directProvider.getLogs({
+      activeProvider.getLogs({
         address: CONFIG.CONTRACT_ADDRESS,
         topics: getIntentFilledTopics(target.userAddress),
         fromBlock: CONTRACT_DEPLOY_BLOCK,

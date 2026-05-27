@@ -5,6 +5,30 @@ export type HistoryFilter = 'all' | 'stake' | 'unstake' | 'swap';
 export type HistorySource = 'wallet' | 'contract';
 export type StatusState = { type: 'idle' | 'loading' | 'success' | 'error'; msg: string };
 
+export interface ChatAction {
+  type: 'stake' | 'unstake' | 'swap';
+  amount?: string;
+  netuid: number;
+  targetNetuid?: number;
+  estimatedAlpha?: string;
+  estimatedTao?: string;
+  intermediateTao?: string;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  text: string;
+  action?: ChatAction;
+}
+
+export interface ChatConversation {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface WalletOption {
   id: WalletType;
   label: string;

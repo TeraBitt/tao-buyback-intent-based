@@ -9,13 +9,6 @@ import {
   ASSETS,
 } from '../data/landing';
 
-interface LandingPageProps {
-  account: string;
-  formatShortValue: (value: string, start?: number, end?: number) => string;
-  onConnectWallet: () => void;
-  onDisconnectWallet: () => void;
-  onOpenApp: () => void;
-}
 const CARD_POSITIONS = [
   { top: 24,  left: 16,  rotate: -6, width: 320 },
   { top: 72,  left: 210, rotate:  4, width: 280 },
@@ -23,13 +16,22 @@ const CARD_POSITIONS = [
   { top: 210, left: 220, rotate: -4, width: 320 },
 ];
 
-export default function LandingPage({
-  account,
-  formatShortValue,
-  onConnectWallet,
-  onDisconnectWallet,
-  onOpenApp,
-}: LandingPageProps) {
+const getLaunchAppHref = () => {
+  if (typeof window === 'undefined') {
+    return '?surface=app&view=chat';
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set('surface', 'app');
+  url.searchParams.set('view', 'chat');
+  url.hash = '';
+  return url.toString();
+};
+
+export default function LandingPage() {
+  const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null);
+  const launchAppHref = getLaunchAppHref();
+
   return (
     <div className="landing-shell landing-shell--taochat">
       <header className="tao-nav">
@@ -44,24 +46,9 @@ export default function LandingPage({
         </nav>
 
         <div className="tao-nav__actions">
-          {account ? (
-            <div className="wallet-inline-actions">
-              <div className="tao-status-pill">
-                <span className="status-dot status-dot--success" />
-                {formatShortValue(account, 6, 4)}
-              </div>
-              <button type="button" className="tao-btn tao-btn--ghost tao-btn--small" onClick={onDisconnectWallet}>
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            <button type="button" className="tao-btn tao-btn--ghost" onClick={onConnectWallet}>
-              Connect wallet
-            </button>
-          )}
-          <button type="button" className="tao-btn tao-btn--primary" onClick={onOpenApp}>
+          <a href={launchAppHref} target="_blank" rel="noreferrer" className="tao-btn tao-btn--primary">
             Launch app →
-          </button>
+          </a>
         </div>
       </header>
 
@@ -81,9 +68,9 @@ export default function LandingPage({
             but the live experience today stays focused on Bittensor EVM testnet.
           </p>
           <div className="tao-hero__actions">
-            <button type="button" className="tao-btn tao-btn--primary tao-btn--large" onClick={onOpenApp}>
+            <a href={launchAppHref} target="_blank" rel="noreferrer" className="tao-btn tao-btn--primary tao-btn--large">
               Launch app →
-            </button>
+            </a>
             <button type="button" className="tao-btn tao-btn--ghost tao-btn--large">
               Read docs
             </button>
@@ -102,14 +89,12 @@ export default function LandingPage({
           </div>
         </section>
 
-{/* ── DEMO SECTION with orange glow ── */}
         <section className="tao-demo" id="demo">
           <div className="tao-demo__inner">
             <div className="tao-section-tag">See it in action</div>
             <div className="tao-section-title">One message. Done.</div>
 
             <div className="tao-demo__window">
-              {/* Glow wrapper — overflow:visible so glow bleeds out around the image */}
               <div
                 className="border-glow-wrapper"
                 style={{
@@ -117,45 +102,6 @@ export default function LandingPage({
                   overflow: "visible",
                 }}
               >
-                {/* ── Orange glow orb — sits BEHIND image via z-index 0 ── */}
-                <div
-                  aria-hidden="true"
-                  style={{
-                    position: "absolute",
-                    top: "50%",
-                    left: "50%",
-                    transform: "translate(-50%, -50%)",
-                    width: "70%",
-                    height: "60%",
-                    background:
-                      "radial-gradient(ellipse at center, rgba(255, 98, 20, 1) 0%, rgba(255, 71, 10, 1) 35%, rgba(200, 50, 5, 1) 65%, transparent 82%)",
-                    filter: "blur(52px)",
-                    borderRadius: "50%",
-                    zIndex: 0,
-                    pointerEvents: "none",
-                  }}
-                />
-
-                {/* ── Wider ambient halo ── */}
-                <div
-                  aria-hidden="true"
-                  style={{
-                    position: "absolute",
-                    top: "50%",
-                    left: "50%",
-                    transform: "translate(-50%, -50%)",
-                    width: "100%",
-                    height: "88%",
-                    background:
-                      "radial-gradient(ellipse at center, rgba(255, 81, 0, 1) 0%, rgba(180, 39, 0, 1) 50%, transparent 76%)",
-                    filter: "blur(72px)",
-                    borderRadius: "50%",
-                    zIndex: 0,
-                    pointerEvents: "none",
-                  }}
-                />
-
-                {/* ── Screenshot — on top of glow via z-index 1 ── */}
                 <img
                   src={ASSETS.APP_SCREENSHOT}
                   alt="TeraBitt app demo"
@@ -170,25 +116,6 @@ export default function LandingPage({
               </div>
             </div>
           </div>
-
-          {/* ── Section-level background light spot behind the whole block ── */}
-          <div
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              top: "18%",
-              left: "50%",
-              transform: "translateX(-50%)",
-              width: "600px",
-              height: "260px",
-              background:
-                "radial-gradient(ellipse at center, rgba(255,110,30,0.18) 0%, rgba(230,136,53,0.08) 45%, transparent 72%)",
-              filter: "blur(80px)",
-              borderRadius: "50%",
-              pointerEvents: "none",
-              zIndex: 0,
-            }}
-          />
         </section>
 
         <section className="tao-vision" id="vision">
@@ -201,7 +128,7 @@ export default function LandingPage({
             <br />
             <p className="tao-vision__copy">
               Bittensor is building the world's most important decentralised AI network. 60+ live subnets, each generating yield for stakers.
-              Getting in has always meant wallets, bridges, and dashboards. TeraBitt removes all of that.
+              Getting in has always meant setup, bridges, and dashboards. TeraBitt removes all of that.
             </p>
             <p className="tao-vision__copy">
               TeraBitt makes it conversational. You tell it what you want in plain English and it handles the transaction flow cleanly.
@@ -233,14 +160,13 @@ export default function LandingPage({
               <div style={{ position: "relative", width: 440, height: 400 }}>
                 {COMMAND_PREVIEWS.map((card, i) => {
                   const pos = CARD_POSITIONS[i];
-                  const [hovered, setHovered] = useState<number | null>(null);
-                  const isHovered = hovered === i;
+                  const isHovered = hoveredCardIndex === i;
 
                   return (
                     <div
                       key={card.prompt}
-                      onMouseEnter={() => setHovered(i)}
-                      onMouseLeave={() => setHovered(null)}
+                      onMouseEnter={() => setHoveredCardIndex(i)}
+                      onMouseLeave={() => setHoveredCardIndex(null)}
                       style={{
                         position: "absolute",
                         top: pos.top,
@@ -271,7 +197,7 @@ export default function LandingPage({
                           fontWeight: 500,
                           color: "white",
                           background: "transparent",
-                          border: "1px solid #ff770038",
+                          border: "1px solid rgba(255,255,255,0.1)",
                           borderRadius: 8,
                           padding: "5px 10px",
                           marginBottom: 10,
@@ -371,11 +297,11 @@ export default function LandingPage({
               <br />
               trade on <em>Bittensor.</em>
             </h2>
-            <p>Connect and make your first stake in under 60 seconds. No setup. No learning curve.</p>
+            <p>Launch and make your first stake in under 60 seconds. No setup. No learning curve.</p>
             <div className="tao-hero__actions">
-              <button type="button" className="tao-btn tao-btn--primary tao-btn--large" onClick={onOpenApp}>
+              <a href={launchAppHref} target="_blank" rel="noreferrer" className="tao-btn tao-btn--primary tao-btn--large">
                 Launch app →
-              </button>
+              </a>
               <button type="button" className="tao-btn tao-btn--ghost tao-btn--large">
                 Join Discord
               </button>
@@ -386,16 +312,14 @@ export default function LandingPage({
 
       <footer className="tao-footer">
         <div className="tao-logo tao-logo--small">
-          TeraBitt
+          TeraBitt <img src={ASSETS.LOGO} alt="" className="tao-logo__image" />
         </div>
         <div className="tao-footer__links">
-          <a href="#">Docs</a>
           <a href="#">Twitter</a>
           <a href="#">Discord</a>
           <a href="#">GitHub</a>
-          <a href="#">Terms</a>
         </div>
-        <div className="tao-footer__copy">© 2025 TeraBitt · Non-custodial · Open source</div>
+        <div className="tao-footer__copy">© 2026 TeraBitt · Non-custodial · Open source</div>
       </footer>
     </div>
   );

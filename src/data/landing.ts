@@ -3,7 +3,7 @@ import ETH from '../assets/eth.png';
 import BASE from '../assets/base.png';
 import TAO from '../assets/tao.png';
 import LOGO from '../assets/terabitt_logo.png';
-import APP_SCREENSHOT from '../assets/app-screenshot1.png';
+import APP_SCREENSHOT from '../assets/app-screenshot2.png';
 
 export const ASSETS = {
   LOGO,
@@ -55,7 +55,7 @@ export const VISION_POINTS = [
   {
     icon: '◎',
     title: 'Non-custodial always',
-    description: 'Every action signs from your own wallet. TeraBitt never holds funds or keys.',
+    description: 'Every action stays under your review. TeraBitt never holds funds or keys.',
   },
 ];
 
@@ -65,7 +65,7 @@ export const USE_CASES = [
     icon: '↑',
     title: 'Stake on any subnet',
     description:
-      'Pick by name, number, or ask for the best performer. Stake any amount of TAO or wALPHA directly from your wallet.',
+      'Pick by name, number, or ask for the best performer. Stake any amount of TAO or wALPHA directly.',
     example: 'Stake 50 TAO on Subnet 19',
   },
   {
@@ -111,8 +111,8 @@ export const USE_CASES = [
 export const HOW_STEPS = [
   {
     step: '1',
-    title: 'Connect wallet',
-    description: 'Link a wallet that supports the current Bittensor EVM testnet flow.',
+    title: 'Launch app',
+    description: 'Open TeraBitt and choose the action you want to start.',
   },
   {
     step: '2',
@@ -137,5 +137,4 @@ export const SUPPORTED_NETWORKS = [
   { name: 'Base', symbol: BASE, status: 'Coming soon'},
   { name: 'Bittensor', symbol: TAO, status: 'Live on testnet'},
 ];
-
 

@@ -13,14 +13,28 @@ export const directProvider = new ethers.JsonRpcProvider(CONFIG.NETWORK.rpcUrls[
   batchStallTime: 25,
 });
 
-export const stakingPrecompile = new ethers.Contract(
+export let activeProvider: ethers.BrowserProvider | ethers.JsonRpcProvider = directProvider;
+
+export let stakingPrecompile = new ethers.Contract(
   STAKING_PRECOMPILE_ADDRESS,
   [
     'function getTotalAlphaStaked(bytes32 hotkey, uint256 netuid) external view returns (uint256)',
     'function getStake(bytes32 hotkey, bytes32 coldkey, uint256 netuid) external view returns (uint256)',
   ],
-  directProvider,
+  activeProvider,
 );
+
+export const setActiveProvider = (prov: ethers.BrowserProvider | null) => {
+  activeProvider = prov || directProvider;
+  stakingPrecompile = new ethers.Contract(
+    STAKING_PRECOMPILE_ADDRESS,
+    [
+      'function getTotalAlphaStaked(bytes32 hotkey, uint256 netuid) external view returns (uint256)',
+      'function getStake(bytes32 hotkey, bytes32 coldkey, uint256 netuid) external view returns (uint256)',
+    ],
+    activeProvider,
+  );
+};
 
 const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 

@@ -9,39 +9,42 @@
   gap: 9px;
 }
 
-.chat-title-brand {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  transition: opacity 0.15s ease;
+.chat-head-l {
+  min-width: 0;
 }
 
-.chat-title-brand:hover {
-  opacity: 0.78;
+.chat-head-l__empty {
+  display: block;
+  min-height: 34px;
 }
 
-.ch-title__logo {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
-  filter: drop-shadow(0 0 14px rgba(246, 133, 27, 0.22));
+.chat-title-meta {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-title-meta .ch-title {
+  display: block;
+  max-width: min(520px, calc(100vw - 520px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.chat-title-uid {
+  color: var(--text-4);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
 }
 
 .av-b {
   background: rgba(255, 255, 255, 0.035);
   border-color: rgba(255, 255, 255, 0.1);
-}
-
-.av-logo {
-  width: 19px;
-  height: 19px;
-  object-fit: contain;
-  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.18));
 }
 
 .chat-body {
@@ -83,6 +86,50 @@
   max-width: 760px;
 }
 
+.chat-wrap--intro .chat-intro-grid>.chat-msgs {
+  align-items: center;
+}
+
+.chat-wrap--intro .chat-intro-grid .msg:not(.user) {
+  justify-content: center;
+  margin-right: auto;
+  margin-left: auto;
+  text-align: center;
+}
+
+.chat-wrap--intro .chat-intro-grid .bub.bot {
+  text-align: center;
+}
+
+.app-sidebar__brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.app-sidebar__brand-logo {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.12));
+}
+
+.app-sidebar__nav-item {
+  min-height: 44px;
+}
+
+.app-sidebar__nav-copy {
+  justify-content: center;
+  gap: 0;
+}
+
 @media (max-width: 920px) {
   .chat-head {
     padding-right: 190px;
@@ -96,6 +143,10 @@
 
   .chat-head-l .ch-sub {
     margin-left: 0;
+  }
+
+  .chat-title-meta .ch-title {
+    max-width: calc(100vw - 32px);
   }
 
   .chat-body>.chat-inline-banner {

@@ -40,13 +40,34 @@ import {
   mergeHistoryEvents,
   type HistoryCacheEntry,
 } from '../utils/history';
-import { directProvider, logRejectedRpcResult, settleRpcBatch, stakingPrecompile, toBigIntOrZero, withRpcBackoff } from '../utils/rpc';
+import { activeProvider, setActiveProvider, directProvider, logRejectedRpcResult, settleRpcBatch, stakingPrecompile, toBigIntOrZero, withRpcBackoff } from '../utils/rpc';
 import { decodeDelegations, decodeSubnetCatalog } from '../utils/scaleDecoders';
 import { simulateStakeAlpha, simulateSwapAlpha, simulateUnstakeTao } from '../utils/simulations';
 import { getHotkeyForNetuid, getMockApyForNetuid, getSubnetLabel, getSubnetPresentation } from '../utils/subnets';
 import { getInjectedProvider } from '../utils/wallets';
 
+const APP_VIEWS: AppView[] = ['dashboard', 'chat', 'history'];
+
+const getInitialRouteFromUrl = (): { surface: Surface; appView: AppView } => {
+  if (typeof window === 'undefined') {
+    return { surface: 'landing', appView: 'dashboard' };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const requestedView = params.get('view') as AppView | null;
+
+  if (params.get('surface') !== 'app') {
+    return { surface: 'landing', appView: 'dashboard' };
+  }
+
+  return {
+    surface: 'app',
+    appView: requestedView && APP_VIEWS.includes(requestedView) ? requestedView : 'chat',
+  };
+};
+
 export function AppProvider({ children }: { children: ReactNode }) {
+  const initialRoute = useMemo(getInitialRouteFromUrl, []);
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
   const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null);
   const [account, setAccount] = useState('');
@@ -79,8 +100,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [destinationPage, setDestinationPage] = useState(1);
   const [subnetSearchQuery, setSubnetSearchQuery] = useState('');
 
-  const [surface, setSurface] = useState<Surface>('landing');
-  const [appView, setAppView] = useState<AppView>('dashboard');
+  const [surface, setSurface] = useState<Surface>(initialRoute.surface);
+  const [appView, setAppView] = useState<AppView>(initialRoute.appView);
   const [stakingAction, setStakingAction] = useState<StakingAction>('stake');
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
   const [historyPage, setHistoryPage] = useState(1);
@@ -102,12 +123,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const [balanceResult, totalAlphaResult, myStakeResult, contractScaleResult, walletScaleResult, subnetInfoResult] =
         await settleRpcBatch(() => [
-          directProvider.getBalance(address),
+          activeProvider.getBalance(address),
           stakingPrecompile.getTotalAlphaStaked(hotkey, netuid),
           stakingPrecompile.getStake(hotkey, contractColdkey, netuid),
-          directProvider.send('delegateInfo_getDelegated', [hexToBytes(contractColdkey)]),
-          directProvider.send('delegateInfo_getDelegated', [hexToBytes(walletColdkey)]),
-          directProvider.send('subnetInfo_getAllDynamicInfo', []),
+          activeProvider.send('delegateInfo_getDelegated', [hexToBytes(contractColdkey)]),
+          activeProvider.send('delegateInfo_getDelegated', [hexToBytes(walletColdkey)]),
+          activeProvider.send('subnetInfo_getAllDynamicInfo', []),
         ]);
 
       logRejectedRpcResult('TAO balance', balanceResult);
@@ -858,7 +879,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       let priceInRao = 1000000000n;
       try {
         setStatus({ type: 'loading', msg: 'Fetching Alpha spot exchange rate...' });
-        const priceRes = await withRpcBackoff(() => directProvider.send('swap_currentAlphaPrice', [sourceNetuid]));
+        const priceRes = await withRpcBackoff(() => activeProvider.send('swap_currentAlphaPrice', [sourceNetuid]));
         if (priceRes) {
           priceInRao = BigInt(priceRes);
         }

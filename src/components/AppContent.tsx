@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Activity, AlertCircle, X } from 'lucide-react';
 import AppShell from './AppShell';
 import ChatPortal from './ChatPortal';
@@ -8,8 +9,15 @@ import WalletModal from './WalletModal';
 import { EXPLORER_BASE_URL } from '../utils/contracts';
 import { formatHistoryTime, formatShortValue, formatTokenAmount } from '../utils/formatters';
 import { getHotkeyForNetuid } from '../utils/subnets';
+import {
+  createChatTitleFromPrompt,
+  createDraftConversation,
+  getInitialChatConversationState,
+  hasStartedConversation,
+  persistChatConversationState,
+} from '../utils/chatConversations';
 import { useAppContext } from '../context/useAppContext';
-import type { StatusState } from '../types';
+import type { ChatConversation, ChatMessage, StatusState } from '../types';
 
 function LoadingState() {
   return (
@@ -23,6 +31,91 @@ function LoadingState() {
 
 export default function AppContent() {
   const app = useAppContext();
+  const [chatState, setChatState] = useState(getInitialChatConversationState);
+
+  useEffect(() => {
+    persistChatConversationState(chatState);
+  }, [chatState]);
+
+  const activeChatConversation = useMemo<ChatConversation>(() => {
+    const fallbackConversation = chatState.conversations[0] ?? createDraftConversation();
+
+    return (
+      chatState.conversations.find((conversation) => conversation.id === chatState.activeConversationId) ??
+      fallbackConversation
+    );
+  }, [chatState.activeConversationId, chatState.conversations]);
+
+  const chatRecents = useMemo(
+    () =>
+      chatState.conversations
+        .filter(hasStartedConversation)
+        .slice()
+        .sort((first, second) => second.updatedAt - first.updatedAt),
+    [chatState.conversations],
+  );
+
+  const handleCreateChat = () => {
+    setChatState((previousState) => {
+      const activeConversation = previousState.conversations.find(
+        (conversation) => conversation.id === previousState.activeConversationId,
+      );
+      const conversationsToKeep =
+        activeConversation && !hasStartedConversation(activeConversation)
+          ? previousState.conversations.filter((conversation) => conversation.id !== activeConversation.id)
+          : previousState.conversations;
+      const nextConversation = createDraftConversation();
+
+      return {
+        conversations: [nextConversation, ...conversationsToKeep],
+        activeConversationId: nextConversation.id,
+      };
+    });
+  };
+
+  const handleSelectChat = (conversationId: string) => {
+    setChatState((previousState) => {
+      if (!previousState.conversations.some((conversation) => conversation.id === conversationId)) {
+        return previousState;
+      }
+
+      return {
+        ...previousState,
+        activeConversationId: conversationId,
+      };
+    });
+  };
+
+  const handleStartChatConversation = (conversationId: string, firstPrompt: string) => {
+    setChatState((previousState) => ({
+      ...previousState,
+      conversations: previousState.conversations.map((conversation) => {
+        if (conversation.id !== conversationId || hasStartedConversation(conversation)) {
+          return conversation;
+        }
+
+        return {
+          ...conversation,
+          title: createChatTitleFromPrompt(firstPrompt),
+          updatedAt: Date.now(),
+        };
+      }),
+    }));
+  };
+
+  const handleUpdateChatMessages = (
+    conversationId: string,
+    updater: (messages: ChatMessage[]) => ChatMessage[],
+  ) => {
+    setChatState((previousState) => ({
+      ...previousState,
+      conversations: previousState.conversations.map((conversation) =>
+        conversation.id === conversationId
+          ? { ...conversation, messages: updater(conversation.messages), updatedAt: Date.now() }
+          : conversation,
+      ),
+    }));
+  };
 
   const renderStatusToast = (toastStatus: StatusState = app.status) => {
     const toastType = toastStatus.type === 'idle' ? 'loading' : toastStatus.type;
@@ -47,21 +140,19 @@ export default function AppContent() {
   return (
     <>
       {app.surface === 'landing' ? (
-        <LandingPage
-          account={app.account}
-          formatShortValue={formatShortValue}
-          onConnectWallet={app.openWalletModal}
-          onDisconnectWallet={app.disconnectWallet}
-          onOpenApp={() => app.openApp()}
-        />
+        <LandingPage />
       ) : (
         <AppShell
           account={app.account}
           appView={app.appView}
+          activeChatId={chatState.activeConversationId}
+          chatRecents={chatRecents}
           formatShortValue={formatShortValue}
           onDisconnectWallet={app.disconnectWallet}
           onConnectWallet={app.openWalletModal}
+          onCreateChat={handleCreateChat}
           onLoadHistory={() => app.fetchOnchainHistory(app.account || undefined)}
+          onSelectChat={handleSelectChat}
           onSetAppView={app.setAppView}
           statusBanner={app.showStatusBanner && !app.showWalletModal ? renderStatusToast() : null}
         >
@@ -145,6 +236,7 @@ export default function AppContent() {
 
           {app.appView === 'chat' && (
             <ChatPortal
+              conversation={activeChatConversation}
               account={app.account}
               balance={app.balance}
               myAlphaBalance={app.myAlphaBalance}
@@ -159,7 +251,8 @@ export default function AppContent() {
               status={app.status}
               openWalletSelector={app.openWalletModal}
               disconnectWallet={app.disconnectWallet}
-              onReturnLanding={() => app.setSurface('landing')}
+              onStartConversation={handleStartChatConversation}
+              onUpdateConversationMessages={handleUpdateChatMessages}
             />
           )}
         </AppShell>

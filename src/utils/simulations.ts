@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import type { SwapAlphaSimulation } from '../types';
-import { directProvider, withRpcBackoff } from './rpc';
+import { activeProvider, withRpcBackoff } from './rpc';
 import {
   bytesFromScaleResult,
   decodeSimSwapAlphaAmount,
@@ -22,7 +22,7 @@ export const simulateStakeAlpha = async (amount: string, targetNetuid: number): 
       return null;
     }
 
-    const simulation = await withRpcBackoff(() => directProvider.send('swap_simSwapTaoForAlpha', [targetNetuid, amountParam]));
+    const simulation = await withRpcBackoff(() => activeProvider.send('swap_simSwapTaoForAlpha', [targetNetuid, amountParam]));
     return decodeSimSwapAlphaAmount(simulation);
   } catch (error) {
     console.error('Failed to simulate stake output:', error);
@@ -55,7 +55,7 @@ export const simulateSwapAlpha = async (
     }
 
     const taoSimulation = await withRpcBackoff(() =>
-      directProvider.send('swap_simSwapAlphaForTao', [sourceNetuid, amountParam]),
+      activeProvider.send('swap_simSwapAlphaForTao', [sourceNetuid, amountParam]),
     );
     const taoRao = decodeSimSwapOutputRao(bytesFromScaleResult(taoSimulation), 0);
     if (taoRao === null || taoRao <= 0n) {
@@ -68,7 +68,7 @@ export const simulateSwapAlpha = async (
     }
 
     const alphaSimulation = await withRpcBackoff(() =>
-      directProvider.send('swap_simSwapTaoForAlpha', [targetNetuid, taoParam]),
+      activeProvider.send('swap_simSwapTaoForAlpha', [targetNetuid, taoParam]),
     );
     const targetAlphaRao = decodeSimSwapOutputRao(bytesFromScaleResult(alphaSimulation), 8);
     if (targetAlphaRao === null) {
@@ -100,7 +100,7 @@ export const simulateUnstakeTao = async (sourceNetuid: number, amount: string): 
     }
 
     const simulation = await withRpcBackoff(() =>
-      directProvider.send('swap_simSwapAlphaForTao', [sourceNetuid, amountParam]),
+      activeProvider.send('swap_simSwapAlphaForTao', [sourceNetuid, amountParam]),
     );
     return decodeSimSwapTaoAmount(simulation);
   } catch (error) {

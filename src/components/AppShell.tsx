@@ -1,28 +1,48 @@
 import { useState, type ReactNode } from 'react';
-import { History, LogOut, MessageCircle, PanelLeftClose, PanelLeftOpen, Repeat2, Wallet } from 'lucide-react';
-import type { AppView } from '../types';
+import {
+  History,
+  LogOut,
+  MessageCircle,
+  MessageSquareText,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Repeat2,
+  SquarePen,
+  Wallet,
+} from 'lucide-react';
+import TERABITT_LOGO from '../assets/terabitt_logo.png';
+import { formatChatUid } from '../utils/chatConversations';
+import type { AppView, ChatConversation } from '../types';
 
 interface AppShellProps {
   account: string;
   appView: AppView;
+  activeChatId: string;
+  chatRecents: ChatConversation[];
   children: ReactNode;
   statusBanner: ReactNode;
   formatShortValue: (value: string, start?: number, end?: number) => string;
   onDisconnectWallet: () => void;
   onConnectWallet: () => void;
+  onCreateChat: () => void;
   onLoadHistory: () => void;
+  onSelectChat: (conversationId: string) => void;
   onSetAppView: (view: AppView) => void;
 }
 
 export default function AppShell({
   account,
   appView,
+  activeChatId,
+  chatRecents,
   children,
   statusBanner,
   formatShortValue,
   onDisconnectWallet,
   onConnectWallet,
+  onCreateChat,
   onLoadHistory,
+  onSelectChat,
   onSetAppView,
 }: AppShellProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -34,23 +54,30 @@ export default function AppShell({
     }
   };
 
+  const handleCreateChat = () => {
+    onCreateChat();
+    onSetAppView('chat');
+  };
+
+  const handleSelectChat = (conversationId: string) => {
+    onSelectChat(conversationId);
+    onSetAppView('chat');
+  };
+
   const navigationItems = [
     {
       view: 'chat' as const,
       label: 'Chat',
-      description: 'Ask and execute',
       icon: <MessageCircle size={16} />,
     },
     {
       view: 'dashboard' as const,
       label: 'Swap',
-      description: 'Stake tools',
       icon: <Repeat2 size={16} />,
     },
     {
       view: 'history' as const,
-      label: 'History',
-      description: 'Past intents',
+      label: 'Transactions',
       icon: <History size={16} />,
     },
   ];
@@ -63,11 +90,12 @@ export default function AppShell({
             type="button"
             className="app-sidebar__brand"
             onClick={() => handleNavigation('chat')}
-            aria-label="Open TaoChat"
-            title="TaoChat"
+            aria-label="Open TeraBitt"
+            title="TeraBitt"
           >
-            <span className="tao-logo tao-logo--small">
-              tao<b>chat</b>
+            <span className="app-sidebar__brand-lockup">
+              <span>TeraBitt</span>
+              <img src={TERABITT_LOGO} alt="" className="app-sidebar__brand-logo" />
             </span>
           </button>
 
@@ -81,6 +109,11 @@ export default function AppShell({
             {isSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
         </div>
+
+        <button type="button" className="app-sidebar__new-chat" onClick={handleCreateChat} title="New chat">
+          <SquarePen size={15} />
+          <span>New chat</span>
+        </button>
 
         <div className="app-sidebar__section-label">Workspace</div>
         <nav className="app-sidebar__nav" aria-label="App navigation">
@@ -96,11 +129,33 @@ export default function AppShell({
               <span className="app-sidebar__icon">{item.icon}</span>
               <span className="app-sidebar__nav-copy">
                 <span>{item.label}</span>
-                <small>{item.description}</small>
               </span>
             </button>
           ))}
         </nav>
+
+        {chatRecents.length > 0 && (
+          <div className="app-sidebar__recents">
+            <div className="app-sidebar__section-label app-sidebar__section-label--recents">Recents</div>
+            <div className="app-sidebar__recent-list" aria-label="Recent chats">
+              {chatRecents.map((conversation) => (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  className={`app-sidebar__recent ${appView === 'chat' && activeChatId === conversation.id ? 'is-active' : ''}`}
+                  onClick={() => handleSelectChat(conversation.id)}
+                  title={`${conversation.title} · UID ${formatChatUid(conversation.id)}`}
+                >
+                  <MessageSquareText size={14} />
+                  <span className="app-sidebar__recent-copy">
+                    <span className="app-sidebar__recent-title">{conversation.title}</span>
+                    <span className="app-sidebar__recent-id">UID {formatChatUid(conversation.id)}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
       </aside>
 

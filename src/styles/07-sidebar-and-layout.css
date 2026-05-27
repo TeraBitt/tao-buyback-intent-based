@@ -62,6 +62,29 @@
   color: var(--text);
 }
 
+.app-sidebar__new-chat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 38px;
+  margin: 0 0 16px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #10151c;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.app-sidebar__new-chat:hover {
+  border-color: var(--border-2);
+  background: #151b24;
+  color: #ffffff;
+}
+
 .app-sidebar__back {
   display: inline-flex;
   align-items: center;
@@ -180,6 +203,96 @@
   border-top: 1px solid var(--border);
 }
 
+.app-sidebar__recents {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  margin-top: 18px;
+}
+
+.app-sidebar__section-label--recents {
+  margin-bottom: 7px;
+}
+
+.app-sidebar__recent-list {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.app-sidebar__recent-list::-webkit-scrollbar {
+  width: 3px;
+}
+
+.app-sidebar__recent-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.app-sidebar__recent {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 42px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.app-sidebar__recent:hover {
+  background: #10151c;
+  color: var(--text);
+}
+
+.app-sidebar__recent.is-active {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.app-sidebar__recent svg {
+  flex: 0 0 auto;
+}
+
+.app-sidebar__recent-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-sidebar__recent-title,
+.app-sidebar__recent-id {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-sidebar__recent-title {
+  color: currentColor;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.app-sidebar__recent-id {
+  color: var(--text-4);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 .back-link {
   width: 100%;
 }
@@ -195,6 +308,7 @@
 
 .dashboard-shell.is-sidebar-collapsed .app-sidebar__collapse,
 .dashboard-shell.is-sidebar-collapsed .app-sidebar__back,
+.dashboard-shell.is-sidebar-collapsed .app-sidebar__new-chat,
 .dashboard-shell.is-sidebar-collapsed .app-sidebar__nav-item {
   width: 52px;
   justify-content: center;
@@ -209,14 +323,20 @@
 
 .dashboard-shell.is-sidebar-collapsed .tao-logo,
 .dashboard-shell.is-sidebar-collapsed .app-sidebar__back span,
+.dashboard-shell.is-sidebar-collapsed .app-sidebar__new-chat span,
 .dashboard-shell.is-sidebar-collapsed .app-sidebar__section-label,
 .dashboard-shell.is-sidebar-collapsed .app-sidebar__nav-copy,
+.dashboard-shell.is-sidebar-collapsed .app-sidebar__recents,
 .dashboard-shell.is-sidebar-collapsed .app-sidebar__footer {
   display: none;
 }
 
 .dashboard-shell.is-sidebar-collapsed .app-sidebar__back {
   margin-bottom: 18px;
+}
+
+.dashboard-shell.is-sidebar-collapsed .app-sidebar__new-chat {
+  padding: 0;
 }
 
 .dashboard-shell.is-sidebar-collapsed .app-sidebar__nav-item {
@@ -323,6 +443,14 @@
     padding: 7px 9px;
   }
 
+  .app-sidebar__new-chat {
+    grid-column: 1 / -1;
+    width: fit-content;
+    min-height: 34px;
+    margin-bottom: 0;
+    padding: 0 10px;
+  }
+
   .app-sidebar__section-label {
     display: none;
   }
@@ -375,6 +503,27 @@
     flex: 1;
   }
 
+  .app-sidebar__recents {
+    grid-column: 1 / -1;
+    flex: initial;
+    margin-top: 0;
+  }
+
+  .app-sidebar__section-label--recents {
+    display: block;
+  }
+
+  .app-sidebar__recent-list {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 2px;
+  }
+
+  .app-sidebar__recent {
+    min-width: 170px;
+  }
+
   .dashboard-shell.is-sidebar-collapsed .app-sidebar {
     grid-template-columns: minmax(0, 1fr) auto;
     padding: 12px;
@@ -392,6 +541,11 @@
   .dashboard-shell.is-sidebar-collapsed .app-sidebar__back {
     width: 34px;
     padding: 7px 0;
+  }
+
+  .dashboard-shell.is-sidebar-collapsed .app-sidebar__new-chat {
+    width: 34px;
+    padding: 0;
   }
 
   .dashboard-shell.is-sidebar-collapsed .app-sidebar__nav {
@@ -416,4 +570,3 @@
     padding-bottom: 26px;
   }
 }
-

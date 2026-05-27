@@ -1,9 +1,30 @@
 /* Make the landing demo screenshot read as a distinct product surface. */
 .tao-demo {
   perspective: 1400px;
-  background:
-    radial-gradient(circle at 50% 24%, rgba(246, 133, 27, 0.1), transparent 28%),
-    linear-gradient(180deg, #050403 0%, #070707 46%, #050403 100%);
+  background: linear-gradient(180deg, #050403 0%, #070707 46%, #050403 100%);
+}
+
+.landing-shell--taochat .tao-hero::before,
+.landing-shell--taochat .tao-cta::before {
+  content: none;
+}
+
+.tao-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tao-logo__image {
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  object-fit: contain;
+}
+
+.tao-logo--small .tao-logo__image {
+  width: 24px;
+  height: 24px;
 }
 
 .tao-demo__inner {
@@ -24,8 +45,8 @@
     #0b0d11;
   box-shadow:
     0 46px 130px rgba(0, 0, 0, 0.78),
-    0 18px 52px rgba(246, 133, 27, 0.08),
-    0 0 0 1px rgba(246, 133, 27, 0.16),
+    0 18px 52px rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transform: translateY(-8px) rotateX(1.5deg);
   transform-origin: center top;
@@ -39,7 +60,7 @@
   pointer-events: none;
   border-radius: inherit;
   background:
-    linear-gradient(90deg, rgba(246, 133, 27, 0.32), transparent 22%, transparent 78%, rgba(246, 133, 27, 0.22)),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.12), transparent 22%, transparent 78%, rgba(255, 255, 255, 0.08)),
     linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent 18%);
   opacity: 0.62;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -87,7 +108,29 @@
 }
 
 .border-glow-wrapper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--angle, 0deg),
+    transparent 0%,
+    transparent 70%,
+    #ff6a00 80%,
+    #ff9a3c 90%,
+    transparent 100%
+  );
   opacity: 0.95;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: spin-border 8.4s linear infinite;
 }
 
 .border-glow-wrapper img {
@@ -95,8 +138,51 @@
   opacity: 0.96;
   outline: 1px solid rgba(255, 255, 255, 0.09);
   box-shadow:
-    0 0 0 1px rgba(246, 133, 27, 0.18),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
     0 24px 80px rgba(0, 0, 0, 0.42);
+}
+
+.tao-nav {
+  position: sticky;
+}
+
+.tao-nav__links {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tao-nav__actions {
+  margin-left: auto;
+}
+
+.tao-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.tao-footer .tao-logo {
+  justify-self: start;
+}
+
+.tao-footer__links {
+  justify-self: center;
+}
+
+.tao-footer__copy {
+  justify-self: end;
+}
+
+.tao-how__step:not(:last-child)::after {
+  color: rgba(255, 255, 255, 0.62);
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.18);
+}
+
+.tao-how__step-number {
+  border-color: rgba(246, 133, 27, 0.85);
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(246, 133, 27, 0.22);
 }
 
 @keyframes landing-demo-float {
@@ -117,5 +203,26 @@
     border-radius: 16px;
     transform: none;
     animation: none;
+  }
+}
+
+@media (max-width: 920px) {
+  .tao-nav__links {
+    position: static;
+    transform: none;
+  }
+
+  .tao-footer {
+    grid-template-columns: 1fr;
+    align-items: center;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .tao-footer .tao-logo,
+  .tao-footer__links,
+  .tao-footer__copy {
+    justify-self: center;
+    text-align: center;
   }
 }

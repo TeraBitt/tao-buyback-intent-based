@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import type { ChatSession, FunctionDeclaration, GenerateContentResult } from '@google/generative-ai';
-import { Activity, Send, ShieldAlert } from 'lucide-react';
-import TERABITT_LOGO from '../assets/terabitt_logo.png';
+import { Activity, Send, ShieldAlert, Sparkles } from 'lucide-react';
+import { CHAT_WELCOME_MESSAGE, formatChatUid } from '../utils/chatConversations';
+import type { ChatConversation, ChatMessage } from '../types';
 
 interface ChatPortalProps {
+  conversation: ChatConversation;
   account: string;
   balance: string;
   myAlphaBalance: string;
@@ -24,7 +26,11 @@ interface ChatPortalProps {
   status: { type: 'idle' | 'loading' | 'success' | 'error'; msg: string };
   openWalletSelector: () => void;
   disconnectWallet: () => void;
-  onReturnLanding: () => void;
+  onStartConversation: (conversationId: string, firstPrompt: string) => void;
+  onUpdateConversationMessages: (
+    conversationId: string,
+    updater: (messages: ChatMessage[]) => ChatMessage[],
+  ) => void;
 }
 
 const stakeTool: FunctionDeclaration = {
@@ -81,20 +87,6 @@ const checkBalancesTool: FunctionDeclaration = {
   },
 };
 
-interface ChatMessage {
-  role: 'user' | 'model';
-  text: string;
-  action?: {
-    type: 'stake' | 'unstake' | 'swap';
-    amount?: string;
-    netuid: number;
-    targetNetuid?: number;
-    estimatedAlpha?: string;
-    estimatedTao?: string;
-    intermediateTao?: string;
-  };
-}
-
 const INPUT_HINTS = [
   { label: '↑ Stake', prompt: 'Stake 50 TAO on Subnet 19' },
   { label: '↓ Unstake', prompt: 'Unstake my Subnet 27 position' },
@@ -104,6 +96,7 @@ const INPUT_HINTS = [
 ];
 
 export default function ChatPortal({
+  conversation,
   account,
   balance,
   myAlphaBalance,
@@ -116,33 +109,82 @@ export default function ChatPortal({
   executeUnstake,
   executeSwap,
   status,
-  onReturnLanding,
+  onStartConversation,
+  onUpdateConversationMessages,
 }: ChatPortalProps) {
-  const initialMessage = import.meta.env.VITE_GEMINI_API_KEY
-    ? "Hey! I'm TaoChat — I can help you stake, unstake, swap, and research Bittensor subnets in plain English."
-    : 'The AI chat surface is wired into the dashboard, but `VITE_GEMINI_API_KEY` is still missing. The staking dashboard is already usable while chat credentials are being added.';
-
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [{ role: 'model', text: initialMessage }]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
+  const messages = conversation.messages;
+  const [inputByConversationId, setInputByConversationId] = useState<Record<string, string>>({});
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const chatSessionsRef = useRef<Record<string, ChatSession>>({});
+  const input = inputByConversationId[conversation.id] ?? '';
+  const loading = loadingConversationId === conversation.id;
 
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  const model = apiKey
-    ? new GoogleGenerativeAI(apiKey).getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      tools: [{ functionDeclarations: [stakeTool, unstakeTool, swapTool, checkBalancesTool] }],
-      systemInstruction:
-        'You are TaoChat for a Bittensor staking dashboard. Help users stake TAO, unstake Alpha, and move positions between Bittensor subnets. Cross-chain deposits are not live yet, so if a user asks about SOL, ETH, bridging, or cross-chain, clearly say it is coming soon and steer them toward the live on-chain staking flows. Be concise, clear, and action-oriented. When the user wants to act, always call the provided tool instead of only describing the action.',
-    })
-    : null;
-
-  const [chatSession] = useState<ChatSession | null>(() => (model ? model.startChat({ history: [] }) : null));
+  const model = useMemo(
+    () =>
+      apiKey
+        ? new GoogleGenerativeAI(apiKey).getGenerativeModel({
+            model: 'gemini-2.5-flash',
+            tools: [{ functionDeclarations: [stakeTool, unstakeTool, swapTool, checkBalancesTool] }],
+            systemInstruction:
+              'You are TaoChat for a Bittensor staking dashboard. Help users stake TAO, unstake Alpha, and move positions between Bittensor subnets. Cross-chain deposits are not live yet, so if a user asks about SOL, ETH, bridging, or cross-chain, clearly say it is coming soon and steer them toward the live on-chain staking flows. Be concise, clear, and action-oriented. When the user wants to act, always call the provided tool instead of only describing the action.',
+          })
+        : null,
+    [apiKey],
+  );
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  }, [conversation.id]);
+
+  const setConversationInput = (value: string) => {
+    setInputByConversationId((previousInputs) => ({
+      ...previousInputs,
+      [conversation.id]: value,
+    }));
+  };
+
+  const clearConversationLoading = (conversationId: string) => {
+    setLoadingConversationId((currentConversationId) =>
+      currentConversationId === conversationId ? null : currentConversationId,
+    );
+  };
+
+  const updateMessages = (conversationId: string, updater: (currentMessages: ChatMessage[]) => ChatMessage[]) => {
+    onUpdateConversationMessages(conversationId, updater);
+  };
+
+  const buildChatHistory = (chatMessages: ChatMessage[]) =>
+    chatMessages
+      .filter(
+        (message) =>
+          message.text !== CHAT_WELCOME_MESSAGE &&
+          !(message.role === 'user' && message.text.startsWith('[System]')),
+      )
+      .map((message) => ({
+        role: message.role,
+        parts: [{ text: message.text }],
+      }));
+
+  const getChatSession = (activeConversation: ChatConversation) => {
+    if (!model) return null;
+
+    const existingSession = chatSessionsRef.current[activeConversation.id];
+    if (existingSession) return existingSession;
+
+    const nextSession = model.startChat({ history: buildChatHistory(activeConversation.messages) });
+    chatSessionsRef.current[activeConversation.id] = nextSession;
+
+    return nextSession;
+  };
 
   const adjustTextareaHeight = () => {
     const element = textareaRef.current;
@@ -158,23 +200,28 @@ export default function ChatPortal({
     return parsed.toFixed(digits).replace(/\.?0+$/, '');
   };
 
-  const chatReady = Boolean(chatSession);
+  const chatReady = Boolean(model);
   const hasSubmittedPrompt = messages.some((message) => message.role === 'user' && !message.text.startsWith('[System]'));
   const isIntroState = !hasSubmittedPrompt;
 
   const dismissAction = (messageIndex: number) => {
-    setMessages((prev) =>
-      prev.map((message, index) => (index === messageIndex ? { ...message, action: undefined } : message)),
+    updateMessages(conversation.id, (previousMessages) =>
+      previousMessages.map((message, index) => (index === messageIndex ? { ...message, action: undefined } : message)),
     );
   };
 
   const handleSend = async () => {
-    if (!input.trim() || !chatSession) return;
+    if (!input.trim() || !chatReady) return;
+
+    const chatSession = getChatSession(conversation);
+    if (!chatSession) return;
 
     const userText = input.trim();
-    setInput('');
-    setMessages((prev) => [...prev, { role: 'user', text: userText }]);
-    setLoading(true);
+    const conversationId = conversation.id;
+    onStartConversation(conversationId, userText);
+    setConversationInput('');
+    updateMessages(conversationId, (previousMessages) => [...previousMessages, { role: 'user', text: userText }]);
+    setLoadingConversationId(conversationId);
 
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -182,29 +229,33 @@ export default function ChatPortal({
 
     try {
       const result = await chatSession.sendMessage(userText);
-      await processResponse(result);
+      await processResponse(result, chatSession, conversationId);
     } catch (error: unknown) {
       console.error(error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setMessages((prev) => [
-        ...prev,
+      updateMessages(conversationId, (previousMessages) => [
+        ...previousMessages,
         {
           role: 'model',
           text: `I hit a network issue while preparing that response: ${errorMessage}`,
         },
       ]);
     } finally {
-      setLoading(false);
+      clearConversationLoading(conversationId);
     }
   };
 
-  const processResponse = async (result: GenerateContentResult) => {
+  const processResponse = async (
+    result: GenerateContentResult,
+    chatSession: ChatSession,
+    conversationId: string,
+  ) => {
     const response = result.response;
     const calls = response.functionCalls();
 
     if (calls && calls.length > 0) {
       for (const call of calls) {
-        if (call.name === 'check_balances' && chatSession) {
+        if (call.name === 'check_balances') {
           const functionResponse = {
             name: call.name,
             response: {
@@ -215,12 +266,12 @@ export default function ChatPortal({
             },
           };
           const nextResult = await chatSession.sendMessage([{ functionResponse }]);
-          await processResponse(nextResult);
+          await processResponse(nextResult, chatSession, conversationId);
         } else if (call.name === 'initiate_stake') {
           const { amount, netuid } = call.args as { amount: string; netuid: number };
           const estimatedAlpha = await simulateStakeAlpha(amount, netuid);
-          setMessages((prev) => [
-            ...prev,
+          updateMessages(conversationId, (previousMessages) => [
+            ...previousMessages,
             {
               role: 'model',
               text: estimatedAlpha
@@ -229,7 +280,7 @@ export default function ChatPortal({
               action: { type: 'stake', amount, netuid, estimatedAlpha: estimatedAlpha ?? undefined },
             },
           ]);
-        } else if (call.name === 'initiate_unstake' && chatSession) {
+        } else if (call.name === 'initiate_unstake') {
           const { netuid, amount } = call.args as { netuid: number; amount?: string };
           const alphaOnNetuid = Number.parseFloat(allAlphaBalances[netuid] || '0');
           const amountToQuote = amount || allAlphaBalances[netuid] || '';
@@ -242,11 +293,11 @@ export default function ChatPortal({
               },
             };
             const nextResult = await chatSession.sendMessage([{ functionResponse }]);
-            await processResponse(nextResult);
+            await processResponse(nextResult, chatSession, conversationId);
           } else {
             const estimatedTao = amountToQuote ? await simulateUnstakeTao(netuid, amountToQuote) : null;
-            setMessages((prev) => [
-              ...prev,
+            updateMessages(conversationId, (previousMessages) => [
+              ...previousMessages,
               {
                 role: 'model',
                 text: estimatedTao
@@ -256,7 +307,7 @@ export default function ChatPortal({
               },
             ]);
           }
-        } else if (call.name === 'initiate_swap' && chatSession) {
+        } else if (call.name === 'initiate_swap') {
           const { sourceNetuid, targetNetuid, amount } = call.args as {
             sourceNetuid: number;
             targetNetuid: number;
@@ -272,7 +323,7 @@ export default function ChatPortal({
               },
             };
             const nextResult = await chatSession.sendMessage([{ functionResponse }]);
-            await processResponse(nextResult);
+            await processResponse(nextResult, chatSession, conversationId);
           } else if (alphaOnSource < Number.parseFloat(amount)) {
             const functionResponse = {
               name: call.name,
@@ -281,12 +332,12 @@ export default function ChatPortal({
               },
             };
             const nextResult = await chatSession.sendMessage([{ functionResponse }]);
-            await processResponse(nextResult);
+            await processResponse(nextResult, chatSession, conversationId);
           } else {
             const simulation = await simulateSwapAlpha(sourceNetuid, targetNetuid, amount);
 
-            setMessages((prev) => [
-              ...prev,
+            updateMessages(conversationId, (previousMessages) => [
+              ...previousMessages,
               {
                 role: 'model',
                 text: simulation
@@ -308,53 +359,73 @@ export default function ChatPortal({
     } else {
       const text = response.text();
       if (text) {
-        setMessages((prev) => [...prev, { role: 'model', text }]);
+        updateMessages(conversationId, (previousMessages) => [...previousMessages, { role: 'model', text }]);
       }
     }
   };
 
   const handleAction = async (action: NonNullable<ChatMessage['action']>) => {
-    if (action.type === 'stake' && action.amount && chatSession) {
+    const chatSession = getChatSession(conversation);
+    if (!chatSession) return;
+
+    const conversationId = conversation.id;
+
+    if (action.type === 'stake' && action.amount) {
       const success = await executeStake(action.amount, action.netuid);
       if (success) {
-        setMessages((prev) => [...prev, { role: 'user', text: `[System] Stake confirmed for ${action.amount} TAO.` }]);
-        setLoading(true);
-        const result = await chatSession.sendMessage(
-          `The staking transaction of ${action.amount} TAO into netuid ${action.netuid} succeeded. Confirm that to the user.`,
-        );
-        await processResponse(result);
-        setLoading(false);
+        updateMessages(conversationId, (previousMessages) => [
+          ...previousMessages,
+          { role: 'user', text: `[System] Stake confirmed for ${action.amount} TAO.` },
+        ]);
+        setLoadingConversationId(conversationId);
+        try {
+          const result = await chatSession.sendMessage(
+            `The staking transaction of ${action.amount} TAO into netuid ${action.netuid} succeeded. Confirm that to the user.`,
+          );
+          await processResponse(result, chatSession, conversationId);
+        } finally {
+          clearConversationLoading(conversationId);
+        }
       }
-    } else if (action.type === 'unstake' && chatSession) {
+    } else if (action.type === 'unstake') {
       const success = await executeUnstake(action.netuid, action.amount);
       if (success) {
         const message = action.amount
           ? `Unstake confirmed for ${action.amount} Alpha from netuid ${action.netuid}.`
           : `Full unstake confirmed from netuid ${action.netuid}.`;
-        setMessages((prev) => [...prev, { role: 'user', text: `[System] ${message}` }]);
-        setLoading(true);
-        const result = await chatSession.sendMessage(
-          `The unstaking transaction from netuid ${action.netuid} succeeded. Confirm that to the user.`,
-        );
-        await processResponse(result);
-        setLoading(false);
+        updateMessages(conversationId, (previousMessages) => [
+          ...previousMessages,
+          { role: 'user', text: `[System] ${message}` },
+        ]);
+        setLoadingConversationId(conversationId);
+        try {
+          const result = await chatSession.sendMessage(
+            `The unstaking transaction from netuid ${action.netuid} succeeded. Confirm that to the user.`,
+          );
+          await processResponse(result, chatSession, conversationId);
+        } finally {
+          clearConversationLoading(conversationId);
+        }
       }
-    } else if (action.type === 'swap' && action.targetNetuid !== undefined && action.amount && chatSession) {
+    } else if (action.type === 'swap' && action.targetNetuid !== undefined && action.amount) {
       const success = await executeSwap(action.netuid, action.targetNetuid, action.amount);
       if (success) {
-        setMessages((prev) => [
-          ...prev,
+        updateMessages(conversationId, (previousMessages) => [
+          ...previousMessages,
           {
             role: 'user',
             text: `[System] Stake move confirmed for ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid}.`,
           },
         ]);
-        setLoading(true);
-        const result = await chatSession.sendMessage(
-          `The subnet rotation of ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid} succeeded. Confirm that to the user.`,
-        );
-        await processResponse(result);
-        setLoading(false);
+        setLoadingConversationId(conversationId);
+        try {
+          const result = await chatSession.sendMessage(
+            `The subnet rotation of ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid} succeeded. Confirm that to the user.`,
+          );
+          await processResponse(result, chatSession, conversationId);
+        } finally {
+          clearConversationLoading(conversationId);
+        }
       }
     }
   };
@@ -363,11 +434,14 @@ export default function ChatPortal({
     <div className={`chat-wrap ${isIntroState ? 'chat-wrap--intro' : ''}`}>
       <div className="chat-head">
         <div className="chat-head-l">
-          <button type="button" className="ch-title chat-title-brand" onClick={onReturnLanding} aria-label="Back to landing page">
-            <img src={TERABITT_LOGO} alt="" className="ch-title__logo" />
-            <span>TeraBitt</span>
-          </button>
-          <div className="ch-sub">{account ? 'Bittensor EVM testnet connected' : 'Bittensor EVM testnet · Connect wallet and proceed'}</div>
+          {isIntroState ? (
+            <span className="chat-head-l__empty" aria-hidden="true" />
+          ) : (
+            <div className="chat-title-meta" title={conversation.id}>
+              <span className="chat-title-uid">UID {formatChatUid(conversation.id)}</span>
+              <h1 className="ch-title">{conversation.title}</h1>
+            </div>
+          )}
         </div>
       </div>
 
@@ -382,7 +456,7 @@ export default function ChatPortal({
             {messages.map((message, index) => (
               <div key={`${message.role}-${index}`} className={`msg ${message.role === 'user' ? 'user' : ''}`}>
                 <div className={`av ${message.role === 'user' ? 'av-u' : 'av-b'}`}>
-                  {message.role === 'user' ? 'U' : <img src={TERABITT_LOGO} alt="" className="av-logo" />}
+                  {message.role === 'user' ? 'U' : <Sparkles size={15} />}
                 </div>
 
                 <div className={`bub ${message.role === 'user' ? 'user' : 'bot'}`}>
@@ -528,7 +602,7 @@ export default function ChatPortal({
           <div className="chat-input-area">
             <div className="input-hints">
               {INPUT_HINTS.map((hint) => (
-                <button key={hint.label} type="button" className="hint" onClick={() => setInput(hint.prompt)}>
+                <button key={hint.label} type="button" className="hint" onClick={() => setConversationInput(hint.prompt)}>
                   {hint.label}
                 </button>
               ))}
@@ -542,7 +616,7 @@ export default function ChatPortal({
                 placeholder={!chatReady ? 'Add VITE_GEMINI_API_KEY to enable live chat...' : 'Ask TaoChat anything — stake, unstake, swap, research…'}
                 value={input}
                 onChange={(event) => {
-                  setInput(event.target.value);
+                  setConversationInput(event.target.value);
                   adjustTextareaHeight();
                 }}
                 onKeyDown={(event) => {

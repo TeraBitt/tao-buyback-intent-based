@@ -51,7 +51,7 @@ export default function HistoryView({
     return (
       <div className="hist-wrap">
         <div className="hist-top">
-          <h2>History</h2>
+          <h2>Transactions</h2>
         </div>
         <div className="empty">
           <div className="empty-ic">☰</div>
@@ -75,7 +75,7 @@ export default function HistoryView({
   return (
     <div className="hist-wrap">
       <div className="hist-top">
-        <h2>History</h2>
+        <h2>Transactions</h2>
         <button
           type="button"
           className="tao-btn tao-btn--ghost tao-btn--small"
@@ -109,7 +109,7 @@ export default function HistoryView({
       {isHistoryLoading ? (
         <div className="empty">
           <div className="empty-ic">◌</div>
-          <div className="empty-t">Loading contract history</div>
+          <div className="empty-t">Loading transactions</div>
           <div className="empty-d">Fetching confirmed stake, unstake, and move intents from the contract.</div>
         </div>
       ) : filteredHistory.length > 0 ? (
