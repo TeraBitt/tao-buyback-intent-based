@@ -446,10 +446,12 @@ export default function ChatPortal({
       </div>
 
       <div className={`chat-body ${isIntroState ? 'chat-body--intro' : 'chat-body--conversation'}`}>
-        <div className="chat-inline-banner">
-          <ShieldAlert size={16} />
-          <span>Live today: Bittensor EVM testnet staking, unstaking, and subnet rotation. External-chain deposits are coming soon.</span>
-        </div>
+        {isIntroState && (
+          <div className="chat-inline-banner">
+            <ShieldAlert size={16} />
+            <span>Live today: Bittensor EVM testnet staking, unstaking, and subnet rotation. External-chain deposits are coming soon.</span>
+          </div>
+        )}
 
         <div className={isIntroState ? 'chat-intro-grid' : 'chat-conversation-grid'}>
           <div className="chat-msgs">
