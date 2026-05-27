@@ -1,7 +1,13 @@
 /* Dashboard refresh */
 .dashboard-shell {
   gap: 0;
-  background: var(--bg);
+  /* Ultra-sleek near-black background with absolutely zero distracting orange glows */
+  background:
+    radial-gradient(circle at 20% 80%, rgba(39, 224, 154, 0.03) 0%, transparent 40%),
+    radial-gradient(circle at 80% 90%, rgba(158, 119, 221, 0.04) 0%, transparent 40%),
+    #050608;
+  position: relative;
+  overflow: hidden;
 }
 
 .app-sidebar {
@@ -43,17 +49,9 @@
   background: #0f1319;
 }
 
-.app-main,
-.swap-wrap,
-.hist-wrap,
-.chat-wrap {
-  margin: 0;
-  background:
-    linear-gradient(180deg, rgba(255, 107, 44, 0.035), transparent 220px),
-    var(--bg);
-}
-
 .app-main {
+  margin: 0;
+  background: transparent;
   gap: 0;
   padding: 0;
 }
