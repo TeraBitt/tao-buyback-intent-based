@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Activity, AlertCircle, X } from 'lucide-react';
 import AppShell from './AppShell';
 import ChatPortal from './ChatPortal';
@@ -31,11 +32,121 @@ function LoadingState() {
 
 export default function AppContent() {
   const app = useAppContext();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const params = useParams<{ chatId?: string }>();
   const [chatState, setChatState] = useState(getInitialChatConversationState);
 
   useEffect(() => {
     persistChatConversationState(chatState);
   }, [chatState]);
+
+  useEffect(() => {
+    const routeChatId = params.chatId;
+    const routePath = location.pathname;
+    const isNewChatRoute = routePath === '/app' || routePath === '/app/chat';
+
+    if (routeChatId) {
+      setChatState((previousState) => {
+        if (previousState.activeConversationId === routeChatId) return previousState;
+        if (!previousState.conversations.some((conversation) => conversation.id === routeChatId)) return previousState;
+        return { ...previousState, activeConversationId: routeChatId };
+      });
+      return;
+    }
+
+    if (!isNewChatRoute) return;
+
+    setChatState((previousState) => {
+      const activeConversation = previousState.conversations.find(
+        (conversation) => conversation.id === previousState.activeConversationId,
+      );
+
+      if (activeConversation && !hasStartedConversation(activeConversation)) {
+        return previousState;
+      }
+
+      const nextConversation = createDraftConversation();
+      const conversationsToKeep = previousState.conversations.filter(hasStartedConversation);
+
+      return {
+        conversations: [nextConversation, ...conversationsToKeep],
+        activeConversationId: nextConversation.id,
+      };
+    });
+  }, [location.pathname, params.chatId]);
+
+  const handleCreateChat = () => {
+    setChatState((previousState) => {
+      const activeConversation = previousState.conversations.find(
+        (conversation) => conversation.id === previousState.activeConversationId,
+      );
+
+      if (activeConversation && !hasStartedConversation(activeConversation)) {
+        return previousState;
+      }
+
+      const nextConversation = createDraftConversation();
+      const conversationsToKeep = previousState.conversations.filter(hasStartedConversation);
+
+      return {
+        conversations: [nextConversation, ...conversationsToKeep],
+        activeConversationId: nextConversation.id,
+      };
+    });
+
+    if (location.pathname !== '/app') {
+      navigate('/app');
+    }
+  };
+
+  const handleSelectChat = (conversationId: string) => {
+    if (location.pathname !== `/app/chat/${conversationId}`) {
+      navigate(`/app/chat/${conversationId}`);
+    }
+
+    setChatState((previousState) => {
+      if (previousState.activeConversationId === conversationId) return previousState;
+      if (!previousState.conversations.some((conversation) => conversation.id === conversationId)) return previousState;
+      return { ...previousState, activeConversationId: conversationId };
+    });
+  };
+
+  const handleDeleteChat = (conversationId: string) => {
+    const remainingConversations = chatState.conversations.filter((conversation) => conversation.id !== conversationId);
+    if (remainingConversations.length === chatState.conversations.length) return;
+
+    setChatState((previousState) => {
+      const nextConversations = previousState.conversations.filter((conversation) => conversation.id !== conversationId);
+      if (nextConversations.length === 0) {
+        const nextConversation = createDraftConversation();
+        return { conversations: [nextConversation], activeConversationId: nextConversation.id };
+      }
+
+      if (previousState.activeConversationId !== conversationId) {
+        return { ...previousState, conversations: nextConversations };
+      }
+
+      const nextActiveConversation = nextConversations.find(hasStartedConversation) ?? nextConversations[0];
+      return { conversations: nextConversations, activeConversationId: nextActiveConversation.id };
+    });
+
+    if (location.pathname === `/app/chat/${conversationId}`) {
+      const nextConversation = remainingConversations[0];
+      if (nextConversation) {
+        navigate(`/app/chat/${nextConversation.id}`);
+      } else {
+        navigate('/app');
+      }
+    }
+  };
+
+  const handleSetAppView = (view: typeof app.appView) => {
+    if (view === 'chat') {
+      navigate('/app');
+    }
+    app.setAppView(view);
+  };
 
   const activeChatConversation = useMemo<ChatConversation>(() => {
     const fallbackConversation = chatState.conversations[0] ?? createDraftConversation();
@@ -54,37 +165,6 @@ export default function AppContent() {
         .sort((first, second) => second.updatedAt - first.updatedAt),
     [chatState.conversations],
   );
-
-  const handleCreateChat = () => {
-    setChatState((previousState) => {
-      const activeConversation = previousState.conversations.find(
-        (conversation) => conversation.id === previousState.activeConversationId,
-      );
-      const conversationsToKeep =
-        activeConversation && !hasStartedConversation(activeConversation)
-          ? previousState.conversations.filter((conversation) => conversation.id !== activeConversation.id)
-          : previousState.conversations;
-      const nextConversation = createDraftConversation();
-
-      return {
-        conversations: [nextConversation, ...conversationsToKeep],
-        activeConversationId: nextConversation.id,
-      };
-    });
-  };
-
-  const handleSelectChat = (conversationId: string) => {
-    setChatState((previousState) => {
-      if (!previousState.conversations.some((conversation) => conversation.id === conversationId)) {
-        return previousState;
-      }
-
-      return {
-        ...previousState,
-        activeConversationId: conversationId,
-      };
-    });
-  };
 
   const handleStartChatConversation = (conversationId: string, firstPrompt: string) => {
     setChatState((previousState) => ({
@@ -153,7 +233,8 @@ export default function AppContent() {
           onCreateChat={handleCreateChat}
           onLoadHistory={() => app.fetchOnchainHistory(app.account || undefined)}
           onSelectChat={handleSelectChat}
-          onSetAppView={app.setAppView}
+          onDeleteChat={handleDeleteChat}
+          onSetAppView={handleSetAppView}
           statusBanner={app.showStatusBanner && !app.showWalletModal ? renderStatusToast() : null}
         >
           {app.appView === 'dashboard' && (

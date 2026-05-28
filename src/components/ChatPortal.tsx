@@ -370,17 +370,26 @@ export default function ChatPortal({
 
     const conversationId = conversation.id;
 
+    // Snapshot balances before execution so we can report changes
+    const preTaoBal = balance;
+    const preAlphaBals = { ...allAlphaBalances };
+
     if (action.type === 'stake' && action.amount) {
       const success = await executeStake(action.amount, action.netuid);
       if (success) {
+        const estimateInfo = action.estimatedAlpha
+          ? ` The estimated Alpha received is ~${formatTokenAmount(action.estimatedAlpha)} ALPHA on Netuid ${action.netuid}.`
+          : '';
+        const balanceInfo = ` Before the transaction, the user had ${formatTokenAmount(preTaoBal)} TAO and ${formatTokenAmount(preAlphaBals[action.netuid] || '0')} ALPHA on Netuid ${action.netuid}. They spent ${action.amount} TAO.`;
+
         updateMessages(conversationId, (previousMessages) => [
           ...previousMessages,
-          { role: 'user', text: `[System] Stake confirmed for ${action.amount} TAO.` },
+          { role: 'user', text: `[System] Stake confirmed for ${action.amount} TAO on Netuid ${action.netuid}.` },
         ]);
         setLoadingConversationId(conversationId);
         try {
           const result = await chatSession.sendMessage(
-            `The staking transaction of ${action.amount} TAO into netuid ${action.netuid} succeeded. Confirm that to the user.`,
+            `The staking transaction of ${action.amount} TAO into Netuid ${action.netuid} succeeded.${estimateInfo}${balanceInfo} Tell the user the transaction was successful and report how much Alpha they received (use the estimated amount). Summarize the value changes clearly.`,
           );
           await processResponse(result, chatSession, conversationId);
         } finally {
@@ -388,11 +397,18 @@ export default function ChatPortal({
         }
       }
     } else if (action.type === 'unstake') {
+      const preAlphaOnNetuid = preAlphaBals[action.netuid] || '0';
       const success = await executeUnstake(action.netuid, action.amount);
       if (success) {
+
+        const estimateInfo = action.estimatedTao
+          ? ` The estimated TAO received is ~${formatTokenAmount(action.estimatedTao)} TAO.`
+          : '';
+        const balanceInfo = ` Before the transaction, the user had ${formatTokenAmount(preTaoBal)} TAO and ${formatTokenAmount(preAlphaOnNetuid)} ALPHA on Netuid ${action.netuid}. They unstaked ${action.amount ? `${formatTokenAmount(action.amount)} ALPHA` : 'their full ALPHA position'}.`;
         const message = action.amount
-          ? `Unstake confirmed for ${action.amount} Alpha from netuid ${action.netuid}.`
-          : `Full unstake confirmed from netuid ${action.netuid}.`;
+          ? `Unstake confirmed for ${formatTokenAmount(action.amount)} Alpha from Netuid ${action.netuid}.`
+          : `Full unstake confirmed from Netuid ${action.netuid}.`;
+
         updateMessages(conversationId, (previousMessages) => [
           ...previousMessages,
           { role: 'user', text: `[System] ${message}` },
@@ -400,7 +416,7 @@ export default function ChatPortal({
         setLoadingConversationId(conversationId);
         try {
           const result = await chatSession.sendMessage(
-            `The unstaking transaction from netuid ${action.netuid} succeeded. Confirm that to the user.`,
+            `The unstaking transaction from Netuid ${action.netuid} succeeded.${estimateInfo}${balanceInfo} Tell the user the transaction was successful and report how much TAO they received back (use the estimated amount). Summarize the value changes clearly.`,
           );
           await processResponse(result, chatSession, conversationId);
         } finally {
@@ -408,19 +424,29 @@ export default function ChatPortal({
         }
       }
     } else if (action.type === 'swap' && action.targetNetuid !== undefined && action.amount) {
+      const preSourceAlpha = preAlphaBals[action.netuid] || '0';
+      const preTargetAlpha = preAlphaBals[action.targetNetuid] || '0';
       const success = await executeSwap(action.netuid, action.targetNetuid, action.amount);
       if (success) {
+        const estimateInfo = action.estimatedAlpha
+          ? ` The estimated Alpha received on Netuid ${action.targetNetuid} is ~${formatTokenAmount(action.estimatedAlpha)} ALPHA.`
+          : '';
+        const routeInfo = action.intermediateTao
+          ? ` The route converted through ~${formatTokenAmount(action.intermediateTao)} TAO.`
+          : '';
+        const balanceInfo = ` Before the transaction: Netuid ${action.netuid} had ${formatTokenAmount(preSourceAlpha)} ALPHA, Netuid ${action.targetNetuid} had ${formatTokenAmount(preTargetAlpha)} ALPHA. The user moved ${formatTokenAmount(action.amount)} ALPHA from Netuid ${action.netuid}.`;
+
         updateMessages(conversationId, (previousMessages) => [
           ...previousMessages,
           {
             role: 'user',
-            text: `[System] Stake move confirmed for ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid}.`,
+            text: `[System] Stake move confirmed for ${formatTokenAmount(action.amount)} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid}.`,
           },
         ]);
         setLoadingConversationId(conversationId);
         try {
           const result = await chatSession.sendMessage(
-            `The subnet rotation of ${action.amount} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid} succeeded. Confirm that to the user.`,
+            `The subnet rotation of ${formatTokenAmount(action.amount)} Alpha from Netuid ${action.netuid} to Netuid ${action.targetNetuid} succeeded.${estimateInfo}${routeInfo}${balanceInfo} Tell the user the transaction was successful and report how much Alpha they received on the destination subnet (use the estimated amount). Summarize the value changes clearly.`,
           );
           await processResponse(result, chatSession, conversationId);
         } finally {
@@ -431,7 +457,7 @@ export default function ChatPortal({
   };
 
   return (
-    <div className={`chat-wrap ${isIntroState ? 'chat-wrap--intro' : ''}`}>
+    <div className={`chat-wrap ${isIntroState ? 'chat-wrap--intro' : 'chat-wrap--conversation'}`}>
       <div className="chat-head">
         <div className="chat-head-l">
           {isIntroState ? (

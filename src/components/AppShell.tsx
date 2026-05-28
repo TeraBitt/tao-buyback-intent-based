@@ -1,13 +1,15 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   History,
   LogOut,
   MessageCircle,
   MessageSquareText,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Repeat2,
   SquarePen,
+  Trash2,
   Wallet,
 } from 'lucide-react';
 import TERABITT_LOGO from '../assets/terabitt_logo.png';
@@ -27,6 +29,7 @@ interface AppShellProps {
   onCreateChat: () => void;
   onLoadHistory: () => void;
   onSelectChat: (conversationId: string) => void;
+  onDeleteChat: (conversationId: string) => void;
   onSetAppView: (view: AppView) => void;
 }
 
@@ -43,6 +46,7 @@ export default function AppShell({
   onCreateChat,
   onLoadHistory,
   onSelectChat,
+  onDeleteChat,
   onSetAppView,
 }: AppShellProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -59,9 +63,38 @@ export default function AppShell({
     onSetAppView('chat');
   };
 
+  const [openRecentMenu, setOpenRecentMenu] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+      if (event.target.closest('.app-sidebar__recent-actions, .app-sidebar__recent-actions-summary, .app-sidebar__recent-menu')) {
+        return;
+      }
+      setOpenRecentMenu(null);
+    };
+
+    document.addEventListener('mousedown', handleDocumentClick);
+    return () => document.removeEventListener('mousedown', handleDocumentClick);
+  }, []);
+
   const handleSelectChat = (conversationId: string) => {
     onSelectChat(conversationId);
     onSetAppView('chat');
+    setOpenRecentMenu(null);
+  };
+
+  const toggleRecentMenu = (conversationId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setOpenRecentMenu((current) => (current === conversationId ? null : conversationId));
+  };
+
+  const handleDeleteRecent = (conversationId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onDeleteChat(conversationId);
+    setOpenRecentMenu(null);
   };
 
   const navigationItems = [
@@ -139,11 +172,18 @@ export default function AppShell({
             <div className="app-sidebar__section-label app-sidebar__section-label--recents">Recents</div>
             <div className="app-sidebar__recent-list" aria-label="Recent chats">
               {chatRecents.map((conversation) => (
-                <button
+                <div
                   key={conversation.id}
-                  type="button"
                   className={`app-sidebar__recent ${appView === 'chat' && activeChatId === conversation.id ? 'is-active' : ''}`}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handleSelectChat(conversation.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      handleSelectChat(conversation.id);
+                    }
+                  }}
                   title={`${conversation.title} · UID ${formatChatUid(conversation.id)}`}
                 >
                   <MessageSquareText size={14} />
@@ -151,7 +191,31 @@ export default function AppShell({
                     <span className="app-sidebar__recent-title">{conversation.title}</span>
                     <span className="app-sidebar__recent-id">UID {formatChatUid(conversation.id)}</span>
                   </span>
-                </button>
+
+                  <div className="app-sidebar__recent-actions">
+                    <button
+                      type="button"
+                      className="app-sidebar__recent-actions-summary"
+                      aria-expanded={openRecentMenu === conversation.id}
+                      aria-label="Open chat actions"
+                      onClick={(event) => toggleRecentMenu(conversation.id, event)}
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
+                    {openRecentMenu === conversation.id && (
+                      <div className="app-sidebar__recent-menu" onClick={(event) => event.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="app-sidebar__recent-menu-item"
+                          onClick={(event) => handleDeleteRecent(conversation.id, event)}
+                        >
+                          <Trash2 size={14} />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           </div>

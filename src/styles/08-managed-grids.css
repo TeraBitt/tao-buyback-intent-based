@@ -9,6 +9,7 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -16,6 +17,41 @@
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
+  height: 100%;
+}
+
+.chat-wrap--conversation {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.chat-wrap--conversation .chat-body {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.chat-wrap--conversation .chat-conversation-grid {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.chat-wrap--conversation .chat-conversation-grid>.chat-msgs {
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 220px;
+}
+
+.chat-wrap--conversation .chat-input-area {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: rgba(9, 12, 17, 0.96);
 }
 
 .chat-intro-grid {

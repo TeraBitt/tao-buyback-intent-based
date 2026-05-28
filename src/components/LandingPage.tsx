@@ -18,11 +18,12 @@ const CARD_POSITIONS = [
 
 const getLaunchAppHref = () => {
   if (typeof window === 'undefined') {
-    return '?surface=app&view=chat';
+    return '/app?view=chat';
   }
 
   const url = new URL(window.location.href);
-  url.searchParams.set('surface', 'app');
+  url.pathname = '/app';
+  url.search = '';
   url.searchParams.set('view', 'chat');
   url.hash = '';
   return url.toString();
@@ -302,9 +303,9 @@ export default function LandingPage() {
               <a href={launchAppHref} target="_blank" rel="noreferrer" className="tao-btn tao-btn--primary tao-btn--large">
                 Launch app →
               </a>
-              <button type="button" className="tao-btn tao-btn--ghost tao-btn--large">
+              <a href="https://discord.com/invite/bittensor" target="_blank" rel="noreferrer" className="tao-btn tao-btn--ghost tao-btn--large">
                 Join Discord
-              </button>
+              </a>
             </div>
           </div>
         </section>
@@ -315,9 +316,9 @@ export default function LandingPage() {
           TeraBitt <img src={ASSETS.LOGO} alt="" className="tao-logo__image" />
         </div>
         <div className="tao-footer__links">
-          <a href="#">Twitter</a>
-          <a href="#">Discord</a>
-          <a href="#">GitHub</a>
+          <a href="https://x.com/terabitt_">Twitter</a>
+          <a href="https://discord.com/invite/bittensor" target="_blank" rel="noreferrer">Discord</a>
+          <a href="https://github.com/TeraBitt/tao-buyback-intent-based" target="_blank" rel="noreferrer">GitHub</a>
         </div>
         <div className="tao-footer__copy">© 2026 TeraBitt · Non-custodial · Open source</div>
       </footer>

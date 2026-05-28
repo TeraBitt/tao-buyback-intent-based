@@ -1,10 +1,12 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { CONFIG } from '../config';
 import { WALLET_OPTIONS } from '../data/wallets';
@@ -48,26 +50,17 @@ import { getInjectedProvider } from '../utils/wallets';
 
 const APP_VIEWS: AppView[] = ['dashboard', 'chat', 'history'];
 
-const getInitialRouteFromUrl = (): { surface: Surface; appView: AppView } => {
-  if (typeof window === 'undefined') {
-    return { surface: 'landing', appView: 'dashboard' };
-  }
-
+const getInitialAppView = (): AppView => {
+  if (typeof window === 'undefined') return 'chat';
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get('view') as AppView | null;
-
-  if (params.get('surface') !== 'app') {
-    return { surface: 'landing', appView: 'dashboard' };
-  }
-
-  return {
-    surface: 'app',
-    appView: requestedView && APP_VIEWS.includes(requestedView) ? requestedView : 'chat',
-  };
+  return requestedView && APP_VIEWS.includes(requestedView) ? requestedView : 'chat';
 };
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const initialRoute = useMemo(getInitialRouteFromUrl, []);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const surface: Surface = location.pathname.startsWith('/app') ? 'app' : 'landing';
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
   const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null);
   const [account, setAccount] = useState('');
@@ -100,8 +93,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [destinationPage, setDestinationPage] = useState(1);
   const [subnetSearchQuery, setSubnetSearchQuery] = useState('');
 
-  const [surface, setSurface] = useState<Surface>(initialRoute.surface);
-  const [appView, setAppView] = useState<AppView>(initialRoute.appView);
+  const [appView, setAppView] = useState<AppView>(getInitialAppView);
   const [stakingAction, setStakingAction] = useState<StakingAction>('stake');
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
   const [historyPage, setHistoryPage] = useState(1);
@@ -790,11 +782,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         amount = amountIfHotkeyUsed;
       }
 
+      const truncatedAmount = amount && amount !== '' && Number.parseFloat(amount) > 0
+        ? Number.parseFloat(amount).toFixed(9).replace(/\.?0+$/, '')
+        : '';
+
       const callData =
-        amount && amount !== '' && Number.parseFloat(amount) > 0
+        truncatedAmount
           ? stakingCallInterface.encodeFunctionData('removeStake', [
               hotkey,
-              ethers.parseUnits(amount, 9),
+              ethers.parseUnits(truncatedAmount, 9),
               targetNetuid,
             ])
           : stakingCallInterface.encodeFunctionData('removeStakeFull', [hotkey, targetNetuid]);
@@ -874,7 +870,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         amount = amountIfHotkeyUsed || '';
       }
 
-      const amountInRao = ethers.parseUnits(amount, 9);
+      const truncatedSwapAmount = Number.parseFloat(amount).toFixed(9).replace(/\.?0+$/, '');
+      const amountInRao = ethers.parseUnits(truncatedSwapAmount, 9);
 
       let priceInRao = 1000000000n;
       try {
@@ -992,13 +989,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const openApp = (view: AppView = 'chat') => {
-    setSurface('app');
+  const openApp = useCallback((view: AppView = 'chat') => {
     setAppView(view);
+    if (surface !== 'app') {
+      navigate('/app');
+    }
     if (view === 'history') {
       void fetchOnchainHistory(account || undefined);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surface, account, navigate]);
+
+  // No-op setter kept for context interface compatibility
+  const setSurface = useCallback((_v: Surface | ((prev: Surface) => Surface)) => {
+    // Surface is now derived from the route; use navigate() instead.
+  }, []);
 
   const activePositions = useMemo(
     () => Object.entries(allAlphaBalances).filter(([, bal]) => Number.parseFloat(bal) > 0),
